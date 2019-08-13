@@ -1,0 +1,16 @@
+machine:
+  python:
+    version: 2.7.11
+
+dependencies:
+  pre:
+    - pip install pytest
+
+  override:
+    - pip install .
+
+test:
+  pre:
+    - rm ./venv
+  override:
+    - py.test
