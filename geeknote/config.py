@@ -18,7 +18,7 @@ else:
 
 USER_STORE_URI = os.environ.get("USER_STORE_URI", "https://{0}/edam/user").format(USER_BASE_URL)
 
-CONSUMER_KEY = os.environ.get("CONSUMER_KEY"
+CONSUMER_KEY = os.environ.get("CONSUMER_KEY")
 CONSUMER_SECRET = os.environ.get("CONSUMER_SECRET")
 
 USER_BASE_URL_SANDBOX = "sandbox.evernote.com"

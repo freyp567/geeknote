@@ -8,7 +8,6 @@ import os
 import mimetypes
 import hashlib
 import re
-import traceback
 
 import thrift.protocol.TBinaryProtocol as TBinaryProtocol
 import thrift.transport.THttpClient as THttpClient
