@@ -18,14 +18,13 @@ else:
 
 USER_STORE_URI = os.environ.get("USER_STORE_URI", "https://{0}/edam/user").format(USER_BASE_URL)
 
-CONSUMER_KEY = os.environ.get("CONSUMER_KEY", "skaizer-5314")
-CONSUMER_SECRET = os.environ.get("CONSUMER_SECRET", "6f4f9183b3120801")
+CONSUMER_KEY = os.environ.get("CONSUMER_KEY"
+CONSUMER_SECRET = os.environ.get("CONSUMER_SECRET")
 
 USER_BASE_URL_SANDBOX = "sandbox.evernote.com"
 USER_STORE_URI_SANDBOX = "https://sandbox.evernote.com/edam/user"
-CONSUMER_KEY_SANDBOX = os.environ.get("CONSUMER_KEY_SANDBOX", "skaizer-1250")
-CONSUMER_SECRET_SANDBOX = os.environ.get("CONSUMER_SECRET_SANDBOX", "ed0fcc0c97c032a5")
-# !!! DO NOT EDIT !!! <<<
+CONSUMER_KEY_SANDBOX = os.environ.get("CONSUMER_KEY_SANDBOX")
+CONSUMER_SECRET_SANDBOX = os.environ.get("CONSUMER_SECRET_SANDBOX")
 
 # can be one of: UPDATED, CREATED, RELEVANCE, TITLE, UPDATE_SEQUENCE_NUMBER
 NOTE_SORT_ORDER = "UPDATED"
@@ -78,7 +77,7 @@ if DEV_MODE:
     USER_BASE_URL = USER_BASE_URL_SANDBOX
     APP_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config")
     sys.stderr.write("Developer mode: using %s as application directory\n" % APP_DIR)
-
+assert CONSUMER_KEY and CONSUMER_SECRET, "must specify CONSUMER_KEY/_SECRET thrugh env variable"
 ERROR_LOG = os.path.join(APP_DIR, "error.log")
 
 # validate config
