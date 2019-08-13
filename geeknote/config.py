@@ -7,23 +7,24 @@ import sys
 APP_DIR = os.path.join(os.getenv("HOME") or os.getenv("USERPROFILE"), ".geeknote")
 ERROR_LOG = os.path.join(APP_DIR, "error.log")
 
-ALWAYS_USE_YINXIANG = False  # for 印象笔记 (Yìnxiàng bǐjì), set to True
+ALWAYS_USE_YINXIANG = os.environ.get("ALWAYS_USE_YINXIANG", "0") in ("1", )  
+# default False  # for 印象笔记 (Yìnxiàng bǐjì), set to True
 
-# !!! DO NOT EDIT !!! >>>
-if ALWAYS_USE_YINXIANG or os.getenv("GEEKNOTE_BASE") == "yinxiang" or os.path.isfile(os.path.join(APP_DIR,"isyinxiang")):
+GEEKNOTE_BASE = os.getenv("GEEKNOTE_BASE", "evernote")
+if ALWAYS_USE_YINXIANG or GEEKNOTE_BASE == "yinxiang" or os.path.isfile(os.path.join(APP_DIR, "isyinxiang")):
     USER_BASE_URL = "app.yinxiang.com"
 else:
     USER_BASE_URL = "www.evernote.com"
 
-USER_STORE_URI = "https://{0}/edam/user".format(USER_BASE_URL)
+USER_STORE_URI = os.environ.get("USER_STORE_URI", "https://{0}/edam/user").format(USER_BASE_URL)
 
-CONSUMER_KEY = "skaizer-5314"
-CONSUMER_SECRET = "6f4f9183b3120801"
+CONSUMER_KEY = os.environ.get("CONSUMER_KEY", "skaizer-5314")
+CONSUMER_SECRET = os.environ.get("CONSUMER_SECRET", "6f4f9183b3120801")
 
 USER_BASE_URL_SANDBOX = "sandbox.evernote.com"
 USER_STORE_URI_SANDBOX = "https://sandbox.evernote.com/edam/user"
-CONSUMER_KEY_SANDBOX = "skaizer-1250"
-CONSUMER_SECRET_SANDBOX = "ed0fcc0c97c032a5"
+CONSUMER_KEY_SANDBOX = os.environ.get("CONSUMER_KEY_SANDBOX", "skaizer-1250")
+CONSUMER_SECRET_SANDBOX = os.environ.get("CONSUMER_SECRET_SANDBOX", "ed0fcc0c97c032a5")
 # !!! DO NOT EDIT !!! <<<
 
 # can be one of: UPDATED, CREATED, RELEVANCE, TITLE, UPDATE_SEQUENCE_NUMBER
@@ -57,8 +58,8 @@ MARKDOWN_EXTENSIONS = ['.md', '.markdown']
 # Accepted html extensions
 HTML_EXTENSIONS = ['.html', '.org']
 
-DEV_MODE = False
-DEBUG = False
+DEV_MODE = os.environ.get("DEV", "0") == "1"  # False
+DEBUG = os.environ.get("DEBUG", "0") == "1"  # False
 
 # Url view the note via the web client
 NOTE_WEBCLIENT_URL = "https://%service%/Home.action?#n=%s"

@@ -39,3 +39,7 @@ installed_files.txt
 include/
 lib/
 local/
+
+# others
+.env
+debug/

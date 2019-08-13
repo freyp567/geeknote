@@ -1,0 +1,21 @@
+[[source]]
+name = "pypi"
+url = "https://pypi.org/simple"
+verify_ssl = true
+
+[dev-packages]
+flake8 = "*"
+
+[packages]
+evernote = ">=1.25"
+html2text = "*"
+markdown2 = "*"
+thrift = "*"
+beautifulsoup4 = "*"
+proxyenv = "*"
+pysqlite = "*"
+lxml = "*"
+SQLAlchemy = "*"
+
+[requires]
+python_version = "2.7"

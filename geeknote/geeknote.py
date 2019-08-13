@@ -211,7 +211,9 @@ class GeekNote(object):
                 self.authToken = token
                 # few user would read the source code and moidfy setting in config.py
                 # so I add this option to make it friendly.
-                if raw_input("Which service? [1]Evernote Global [2]Yinxiang China:  ") == "2":
+                if config.GEEKNOTE_BASE == 'evernote':
+                    pass
+                elif raw_input("Which service? [1]Evernote Global [2]Yinxiang China:  ") == "2":
                     # yinxiang
                     config.USER_BASE_URL = "app.yinxiang.com"
                     open(os.path.join(config.APP_DIR, "isyinxiang"), "w+").close()
