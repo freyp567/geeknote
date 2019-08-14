@@ -16,6 +16,7 @@ proxyenv = "*"
 pysqlite = "*"
 lxml = "*"
 SQLAlchemy = "*"
+python-slugify = "*"
 
 [requires]
 python_version = "2.7"

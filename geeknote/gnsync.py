@@ -9,8 +9,8 @@ import glob
 import logging
 import re
 import hashlib
-import binascii
 import mimetypes
+from slugify import slugify
 
 import evernote.edam.type.ttypes as Types
 from evernote.edam.limits.constants import EDAM_USER_NOTES_MAX
@@ -36,7 +36,7 @@ handler = logging.FileHandler(def_logpath)
 handler.setFormatter(formatter)
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(os.environ.get('LOGLEVEL') or logging.DEBUG)
 logger.addHandler(handler)
 
 # http://en.wikipedia.org/wiki/Unicode_control_characters
@@ -83,9 +83,11 @@ def reset_logpath(logpath):
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
+
 def all_notebooks(sleep_on_ratelimit=False):
     geeknote = GeekNote(sleepOnRateLimit=sleep_on_ratelimit)
-    return [notebook.name for notebook in geeknote.findNotebooks()]
+    return [notebook for notebook in geeknote.findNotebooks()]
+
 
 def all_linked_notebooks():
     geeknote = GeekNote()
@@ -541,12 +543,12 @@ def main():
 
         if args.all:
             for notebook in all_notebooks(sleep_on_ratelimit=args.sleep_on_ratelimit):
-                logger.info("Syncing notebook %s", notebook)
-                escaped_notebook_path = re.sub(os.sep, '-', notebook)
+                logger.info("Syncing notebook %s (%s)", notebook.name, notebook.guid)
+                escaped_notebook_path = slugify(notebook.name)
                 notebook_path = os.path.join(path, escaped_notebook_path)
                 if not os.path.exists(notebook_path):
                     os.mkdir(notebook_path)
-                GNS = GNSync(notebook, notebook_path, mask, format, twoway, download_only, nodownsync, sleep_on_ratelimit=args.sleep_on_ratelimit, imageOptions=imageOptions)
+                GNS = GNSync(notebook.name, notebook_path, mask, format, twoway, download_only, nodownsync, sleep_on_ratelimit=args.sleep_on_ratelimit, imageOptions=imageOptions)
                 GNS.sync()
         else:
             GNS = GNSync(notebook, path, mask, format, twoway, download_only, nodownsync, sleep_on_ratelimit=args.sleep_on_ratelimit, imageOptions=imageOptions)
@@ -558,7 +560,7 @@ def main():
         pass
 
     except Exception, e:
-        logger.error(str(e))
+        logger.exception("gnsync failed")
 
 if __name__ == "__main__":
     main()

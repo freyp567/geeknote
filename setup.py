@@ -56,16 +56,17 @@ setup(
     name='geeknote',
     version=__version__,
     license='GPL',
-    author='Jeff Kowalski',
+    author='Peter Frey',
     #author_email='',
     description='Geeknote - is a command line client for Evernote, '
-                'that can be used on Linux, FreeBSD and OS X.',
+                'that can be used on Linux, FreeBSD and OS X. '
+                '(based on work from Jeff Kowalski)',
     long_description=read("README.md"),
-    url='http://github.com/jeffkowalski/geeknote',
+    url='https://github.com/freyp567/geeknote',
     packages=['geeknote'],
 
     classifiers=[
-        'Development Status :: 5 - Production/Stable',
+        'Development Status :: 3 - Alpha',
         'Intended Audience :: End Users/Desktop',
         'License :: OSI Approved :: GNU General Public License (GPL)',
         'Environment :: Console',
@@ -83,7 +84,8 @@ setup(
         'beautifulsoup4',
         'thrift',
         'proxyenv',
-        'lxml'
+        'lxml',
+        'python-slugify'
     ],
 
     entry_points={
