@@ -43,6 +43,9 @@ include/
 lib/
 local/
 
+# project
+config/
+
 # others
 .env
 debug/
