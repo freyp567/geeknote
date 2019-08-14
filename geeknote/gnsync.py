@@ -363,7 +363,7 @@ class GNSync:
         """
         GeekNote(sleepOnRateLimit=self.sleep_on_ratelimit).loadNoteContent(note)
 
-        escaped_title = re.sub(os.sep,'-', note.title)
+        escaped_title = note.title.replace(os.sep, '-')
 
         # Save images
         if 'saveImages' in self.imageOptions and self.imageOptions['saveImages']:
@@ -463,8 +463,12 @@ class GNSync:
         """
         Get notes from evernote.
         """
-        keywords = 'notebook:"{0}"'.format(tools.strip(self.notebook_name.encode('utf-8')))
-        return GeekNote(sleepOnRateLimit=self.sleep_on_ratelimit).findNotes(keywords, EDAM_USER_NOTES_MAX).notes
+        # keywords = 'notebook:"{0}"'.format(tools.strip(self.notebook_name.encode('utf-8')))
+        # keywords = 'intitle:"" notebook:"{0}"'.format(tools.strip(self.notebook_name.encode('utf-8')))
+        # unfortunately not working 
+        keywords = ''
+        gn = GeekNote(sleepOnRateLimit=self.sleep_on_ratelimit)
+        return gn.findNotes(keywords, EDAM_USER_NOTES_MAX, notebookGuid=self.notebook_guid).notes
 
 
 def main():
@@ -551,7 +555,7 @@ def main():
                 GNS = GNSync(notebook.name, notebook_path, mask, format, twoway, download_only, nodownsync, sleep_on_ratelimit=args.sleep_on_ratelimit, imageOptions=imageOptions)
                 GNS.sync()
         else:
-            GNS = GNSync(notebook, path, mask, format, twoway, download_only, nodownsync, sleep_on_ratelimit=args.sleep_on_ratelimit, imageOptions=imageOptions)
+            GNS = GNSync(notebook.name, path, mask, format, twoway, download_only, nodownsync, sleep_on_ratelimit=args.sleep_on_ratelimit, imageOptions=imageOptions)
             GNS.sync()
 
         

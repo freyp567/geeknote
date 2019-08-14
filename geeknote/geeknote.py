@@ -247,7 +247,7 @@ class GeekNote(object):
                                            withResourcesAlternateData)
 
     @EdamException
-    def findNotes(self, keywords, count, createOrder=False, offset=0, deletedOnly=False):
+    def findNotes(self, keywords, count, createOrder=False, offset=0, deletedOnly=False, notebookGuid=None):
         """ WORK WITH NOTES """
         noteFilter = NoteStore.NoteFilter(order=Types.NoteSortOrder.RELEVANCE)
         noteFilter.order = getattr(Types.NoteSortOrder, self.noteSortOrder)
@@ -260,18 +260,24 @@ class GeekNote(object):
         if deletedOnly:
             noteFilter.inactive = True
 
+        if notebookGuid:
+            noteFilter.notebookGuid = notebookGuid
+
         meta = NotesMetadataResultSpec()
         meta.includeTitle = True
         meta.includeContentLength = True
         meta.includeCreated = True
         meta.includeUpdated = True
+        meta.includeDeleted = False
         meta.includeNotebookGuid = True
         meta.includeAttributes = True
         meta.includeTagGuids = True
         meta.includeLargestResourceMime = True
         meta.includeLargestResourceSize = True
+        meta.includeUpdateSequenceNum = True
 
-        result = self.getNoteStore().findNotesMetadata(self.authToken, noteFilter, offset, count, meta)
+        note_store = self.getNoteStore()
+        result = note_store.findNotesMetadata(self.authToken, noteFilter, offset, count, meta)
 
         # Reduces the count by the amount of notes already retrieved
         count = max(count - len(result.notes), 0)
