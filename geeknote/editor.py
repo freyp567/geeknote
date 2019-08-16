@@ -57,7 +57,7 @@ class Editor(object):
         Creates a list of image resources to save.
         Each has a hash and extension attribute.
         '''
-        soup = BeautifulSoup(contentENML.decode('utf-8'))
+        soup = BeautifulSoup(contentENML.decode('utf-8'), features="lxml")
         imageList = []
         for section in soup.findAll('en-media'):
             if 'type' in section.attrs and 'hash' in section.attrs:
@@ -80,6 +80,10 @@ class Editor(object):
     @staticmethod
     def ENMLtoText(contentENML, format='default', imageOptions={'saveImages': False}, imageFilename=""):
         soup = BeautifulSoup(contentENML.decode('utf-8'), 'html.parser')
+
+        if format == 'markdown':
+            # keep format for lossless backup
+            return contentENML
 
         if format == 'pre':
             #
@@ -135,8 +139,8 @@ class Editor(object):
 
         content = html2text.html2text(str(soup).decode('utf-8'), '')
 
-        content = re.sub(r' *\n', os.linesep, content)
-        content = content.replace(unichr(160), " ") # no-break space
+        content = re.sub(r' *\n', '\n', content)
+        content = content.replace(unichr(160), " ")  # no-break space
         content = Editor.HTMLUnescape(content)
 
         return content.encode('utf-8')
@@ -208,11 +212,13 @@ class Editor(object):
                     storage = Storage()
                     extras = storage.getUserprop('markdown2_extras')
                     content = Editor.HTMLEscapeTag(content)
+                else:
+                    content = content  # normalize image paths?
 
                 contentHTML = markdown.markdown(content, extras=extras)
 
                 soup = BeautifulSoup(contentHTML, 'html.parser')
-                Editor.checklistInSoupToENML(soup)
+                Editor.checklistInSoupToENML(soup)  #TODO also for raw markdown / ENML ?
                 contentHTML = str(soup)
             elif format == 'html':
                 # Html to ENML http://dev.evernote.com/doc/articles/enml.php
@@ -237,11 +243,11 @@ class Editor(object):
                 contentHTML = Editor.HTMLEscape(content)
 
                 tmpstr = ''
-                for l in contentHTML.split('\n'):
-                    if l == '':
+                for line in contentHTML.split('\n'):
+                    if line == '':
                         tmpstr = tmpstr + u'<div><br/></div>'
                     else:
-                        tmpstr = tmpstr + u'<div>' + l + u'</div>'
+                        tmpstr = tmpstr + u'<div>' + line + u'</div>'
 
                 contentHTML = tmpstr.encode("utf-8")
                 contentHTML = contentHTML.replace('[x]', '<en-todo checked="true"></en-todo>')
@@ -249,7 +255,7 @@ class Editor(object):
 
             return Editor.wrapENML(contentHTML)
 
-        except:
+        except Exception:
             import traceback
             traceback.print_exc()
             if raise_ex:

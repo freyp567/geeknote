@@ -42,12 +42,17 @@ logger.addHandler(handler)
 # http://en.wikipedia.org/wiki/Unicode_control_characters
 CONTROL_CHARS_RE = re.compile(u'[\x00-\x08\x0e-\x1f\x7f-\x9f]')
 
+FILE_FORMAT = {
+    '.md': 'markdown',
+    '.html': 'html',
+    '.txt': 'text',
+}
 
 def remove_control_characters(s):
     return CONTROL_CHARS_RE.sub('', s)
 
 
-def log(func):
+def log(func):  # TODO rethink, swallowing exceptions is normally a bad habit
     def wrapper(*args, **kwargs):
         try:
             return func(*args, **kwargs)
@@ -175,7 +180,8 @@ class GNSync:
         if not self.download_only:
             for f in files:
                 has_note = False
-                meta = self._parse_meta(self._get_file_content(f['path']))
+                content = self._get_file_content(f['path'], f['format'])
+                meta = self._parse_meta(content, f['format'])
                 title = f['name'] if 'title' not in meta else meta['title'].strip()
                 tags = None if 'tags' not in meta else meta['tags'] \
                     .replace('[', '').replace(']', '').split(',')
@@ -184,9 +190,14 @@ class GNSync:
                 meta['title'] = title
                 note = None
 
-                if self.format == 'html':
+                if f['format'] == 'html':
                     meta['mtime'] = f['mtime']
                     note = self._html2note(meta)
+                elif f['format'] == 'markdown':
+                    meta['mtime'] = f['mtime']
+                    note = self._md2note(meta)
+                else:
+                    assert False, "unsupported format for upload: %s" % f['format']
 
                 for n in notes:
                     if title == n.title:
@@ -226,7 +237,7 @@ class GNSync:
         logger.info('Sync Complete')
 
     @log
-    def _parse_meta(self, content):
+    def _parse_meta(self, content, file_format):
         """
         Parse jekyll metadata of note, eg:
         ---
@@ -295,20 +306,67 @@ class GNSync:
         return note
 
     @log
+    def _md2note(self, meta):
+        """
+        parse markdown to note
+        TODO: refactor to handle format logic better (see _html2note)
+        """
+        note = Types.Note()
+        note.title = meta['title'].strip() if 'title' in meta else None
+        note.tagNames = meta['tags']
+        note.created = meta['mtime']
+        note.resources = []
+        content = meta['content']  # TODO convert markdown to ENML
+        for line in content:
+            if line.startswith('![]'):  #TODO refactor, lengthy code
+                match = re.match('\((.*?)\)', line[3:])
+                assert match is not None, "failed to extract image path"
+                img_path = match.group(1)
+                img = None
+                with open(img_path, 'rb') as f:
+                    img = f.read()
+                md5 = hashlib.md5()
+                md5.update(img)
+                hash = md5.digest()
+                hexHash = binascii.hexlify(hash)
+                mime = mimetypes.guess_type(tag['src'])[0]
+
+                data = Types.Data()
+                data.size = len(img)
+                data.bodyHash = hash
+                data.body = img
+
+                resource = Types.Resource()
+                resource.mime = mime
+                resource.data = data
+
+                #tag.name = 'en-media'
+                #tag.attrs['type'] = mime
+                #tag.attrs['hash'] = hexHash
+                #tag.attrs.pop('src', None)
+                #TODO how to append this
+
+                note.resources.append(resource)
+        note.notebookGuid = self.notebook_guid
+        note.content = content
+        return note
+
+    @log
     def _update_note(self, file_note, note, title=None, content=None, tags=None):
         """
         Updates note from file
         """
-        # content = self._get_file_content(file_note['path']) if content is None else content
+        if content is None:
+            content = self._get_file_content(file_note['path'], file_note['format'])
         try:
-            tags=tags or note.tagNames
+            tags = tags or note.tagNames
         except AttributeError:
-            tags=None
+            tags = None
 
         result = GeekNote(sleepOnRateLimit=self.sleep_on_ratelimit).updateNote(
             guid=note.guid,
             title=title or note.title,
-            content=content or self._get_file_content(file_note['path']),
+            content=content,
             tags=tags,
             notebook=self.notebook_guid)
 
@@ -335,8 +393,7 @@ class GNSync:
         """
         Creates note from file
         """
-
-        content = content or self._get_file_content(file_note['path'])
+        content = content or self._get_file_content(file_note['path'], file_note['format'])
 
         if content is None:
             return
@@ -382,7 +439,7 @@ class GNSync:
                     binaryHash = binascii.unhexlify(imageInfo['hash'])
                     GeekNote(sleepOnRateLimit=self.sleep_on_ratelimit).saveMedia(note.guid, binaryHash, filename)
 
-        content = Editor.ENMLtoText(note.content.encode('utf-8'), self.imageOptions)
+        content = Editor.ENMLtoText(note.content, format=self.format, imageOptions=self.imageOptions)
         path = os.path.join(self.path, escaped_title + self.extension)
         open(path, "w").write(content)
         updated_seconds = note.updated / 1000.0
@@ -390,7 +447,7 @@ class GNSync:
         return True
 
     @log
-    def _get_file_content(self, path):
+    def _get_file_content(self, path, file_format):
         """
         Get file content.
         """
@@ -399,7 +456,7 @@ class GNSync:
 
         # strip unprintable characters
         content = content.encode('ascii', errors='xmlcharrefreplace')
-        content = Editor.textToENML(content=content, raise_ex=True, format=self.format)
+        content = Editor.textToENML(content=content, raise_ex=True, format=file_format)
 
         if content is None:
             logger.warning("File {0}. Content must be "
@@ -438,6 +495,10 @@ class GNSync:
 
         return (guid, notebook_name)
 
+    def _determine_format(self, file_path):
+        ftype = os.path.splitext(file_path)[1]
+        return FILE_FORMAT.get(ftype, 'unknown')
+
     @log
     def _get_files(self):
         """
@@ -453,8 +514,9 @@ class GNSync:
                 file_name = os.path.splitext(file_name)[0]
 
                 mtime = int(os.path.getmtime(f) * 1000)
+                format = self._determine_format(f)
 
-                files.append({'path': f, 'name': file_name, 'mtime': mtime})
+                files.append({'path': f, 'name': file_name, 'mtime': mtime, 'format': format})
 
         return files
 
@@ -465,7 +527,7 @@ class GNSync:
         """
         # keywords = 'notebook:"{0}"'.format(tools.strip(self.notebook_name.encode('utf-8')))
         # keywords = 'intitle:"" notebook:"{0}"'.format(tools.strip(self.notebook_name.encode('utf-8')))
-        # unfortunately not working 
+        # unfortunately above not working 
         keywords = ''
         gn = GeekNote(sleepOnRateLimit=self.sleep_on_ratelimit)
         return gn.findNotes(keywords, EDAM_USER_NOTES_MAX, notebookGuid=self.notebook_guid).notes
@@ -476,7 +538,8 @@ def main():
         parser = argparse.ArgumentParser()
         parser.add_argument('--path', '-p', action='store', help='Path to synchronize directory')
         parser.add_argument('--mask', '-m', action='store', help='Mask of files to synchronize. Default is "*.*"')
-        parser.add_argument('--format', '-f', action='store', default='plain', choices=['plain', 'markdown', 'html'], help='The format of the file contents. Default is "plain". Valid values are "plain" "html" and "markdown"')
+        parser.add_argument('--format', '-f', action='store', default='plain', choices=['plain', 'markdown', 'html'], 
+            help='The format of the file contents. Default is "plain". Valid values are "plain" "html" and "markdown"')
         parser.add_argument('--notebook', '-n', action='store', help='Notebook name for synchronize. Default is default notebook unless all is selected')
         parser.add_argument('--all', '-a', action='store_true', help='Synchronize all notebooks', default=False)
         parser.add_argument('--all-linked', action='store_true', help='Get all linked notebooks')
@@ -493,7 +556,7 @@ def main():
         path = args.path if args.path else "."
         mask = args.mask if args.mask else None
         format = args.format if args.format else None
-        notebook = args.notebook if args.notebook else None
+        notebook_name = args.notebook if args.notebook else None
         logpath = args.logpath if args.logpath else None
         twoway = args.two_way
         download_only = args.download_only
@@ -555,7 +618,7 @@ def main():
                 GNS = GNSync(notebook.name, notebook_path, mask, format, twoway, download_only, nodownsync, sleep_on_ratelimit=args.sleep_on_ratelimit, imageOptions=imageOptions)
                 GNS.sync()
         else:
-            GNS = GNSync(notebook.name, path, mask, format, twoway, download_only, nodownsync, sleep_on_ratelimit=args.sleep_on_ratelimit, imageOptions=imageOptions)
+            GNS = GNSync(notebook_name, path, mask, format, twoway, download_only, nodownsync, sleep_on_ratelimit=args.sleep_on_ratelimit, imageOptions=imageOptions)
             GNS.sync()
 
         

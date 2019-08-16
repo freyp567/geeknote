@@ -30,7 +30,6 @@ from storage import Storage
 from log import logging
 
 
-
 def GeekNoneDBConnectOnly(func):
     """ operator to disable evernote connection
     or create instance of GeekNote """
@@ -121,7 +120,7 @@ class GeekNote(object):
 
                         elif errorCode == 3:
                             out.failureMessage("Sorry, you are not authorized "
-                                            "to perform this operation.")
+                                               "to perform this operation.")
                             tools.exitErr()
 
                         # Rate limited
@@ -134,7 +133,7 @@ class GeekNote(object):
                                 time.sleep(e.rateLimitDuration)
                             else:
                                 print("\nRate Limit Hit: Please wait %s seconds before continuing" %
-                                    str(e.rateLimitDuration))
+                                      str(e.rateLimitDuration))
                                 tools.exitErr()
                         else:
                             out.failureMessage("Unknown error")
@@ -312,8 +311,8 @@ class GeekNote(object):
     @EdamException
     def loadLinkedNoteContent(self, note):
         if not isinstance(note, object):
-            raise Excetion("Note content must be an "
-                           "instance of Note, '%s' given." % type(note))
+            raise Exception("Note content must be an "
+                            "instance of Note, '%s' given." % type(note))
 
         note.content = self.sharedNoteStore.getNoteContent(self.sharedAuthToken, note.guid)
         # TODO
