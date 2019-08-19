@@ -129,7 +129,7 @@ class GeekNote(object):
                         elif errorCode == 19:
                             if sleepOnRateLimit:
                                 print("\nRate Limit Hit: Sleeping %s seconds before continuing" %
-                                    str(e.rateLimitDuration))
+                                      str(e.rateLimitDuration))
                                 time.sleep(e.rateLimitDuration)
                             else:
                                 print("\nRate Limit Hit: Please wait %s seconds before continuing" %

@@ -7,7 +7,7 @@ import sys
 APP_DIR = os.path.join(os.getenv("HOME") or os.getenv("USERPROFILE"), ".geeknote")
 ERROR_LOG = os.path.join(APP_DIR, "error.log")
 
-ALWAYS_USE_YINXIANG = os.environ.get("ALWAYS_USE_YINXIANG", "0") in ("1", )  
+ALWAYS_USE_YINXIANG = os.environ.get("ALWAYS_USE_YINXIANG", "0") in ("1", )
 # default False  # for 印象笔记 (Yìnxiàng bǐjì), set to True
 
 GEEKNOTE_BASE = os.getenv("GEEKNOTE_BASE", "evernote")
@@ -34,7 +34,7 @@ NOTE_SORT_ORDER = "UPDATED"
 try:
     IS_IN_TERMINAL = sys.stdin.isatty()
     IS_OUT_TERMINAL = sys.stdout.isatty()
-except:
+except Exception:
     IS_IN_TERMINAL = False
     IS_OUT_TERMINAL = False
 
@@ -96,3 +96,9 @@ if DEV_MODE:
 
 NOTE_WEBCLIENT_URL = NOTE_WEBCLIENT_URL.replace('%service%', USER_BASE_URL)
 NOTE_LINK = NOTE_LINK.replace('%service%', USER_BASE_URL)
+
+
+# monbodb
+DB_URI = os.environ.get('DB_URI')
+DB_NAME = os.environ.get('DB_NAME')
+DB_USERNAME = os.environ.get('DB_USERNAME')

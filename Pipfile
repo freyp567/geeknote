@@ -17,6 +17,7 @@ pysqlite = "*"
 lxml = "*"
 SQLAlchemy = "*"
 python-slugify = "*"
+pymongo = "*"
 
 [requires]
 python_version = "2.7"
