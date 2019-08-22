@@ -3,6 +3,8 @@
 enex parser
 """
 
+import os
+import re
 from lxml import etree
 import dateutil
 
