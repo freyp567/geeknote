@@ -190,12 +190,13 @@ class GNSync:
                 meta['title'] = title
                 note = None
 
+                meta['mtime'] = f['mtime']
                 if f['format'] == 'html':
-                    meta['mtime'] = f['mtime']
                     note = self._html2note(meta)
                 elif f['format'] == 'markdown':
-                    meta['mtime'] = f['mtime']
-                    note = self._md2note(meta)
+                    # note = self._md2note(meta)  
+                    # as Editor.textToENML converts markdown to HTML, reuse
+                    note = self._html2note(meta)
                 else:
                     assert False, "unsupported format for upload: %s" % f['format']
 

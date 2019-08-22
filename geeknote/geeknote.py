@@ -539,6 +539,13 @@ class GeekNote(object):
         open(filename, "w").write(resource.data.body)
         return True
 
+    @EdamException
+    def handleMedia(self, guid, mediaHash, handler):
+        logging.debug("handleMedia: guid:{}, mediaHash:{}".format(guid, mediaHash))
+
+        resource = self.getNoteStore().getResourceByHash(self.authToken, guid, mediaHash, True, False, False)
+        return handler(resource)
+
 
 class GeekNoteConnector(object):
     evernote = None

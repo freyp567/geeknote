@@ -102,3 +102,9 @@ NOTE_LINK = NOTE_LINK.replace('%service%', USER_BASE_URL)
 DB_URI = os.environ.get('DB_URI')
 DB_NAME = os.environ.get('DB_NAME')
 DB_USERNAME = os.environ.get('DB_USERNAME')
+
+# ftp to leanote file storage
+FTP_HOST = os.environ.get('FTP_HOST')
+FTP_USER = os.environ.get('FTP_USER')
+FTP_PWD = os.environ.get('FTP_PWD')
+

@@ -3,7 +3,7 @@
 import out
 import sys
 import time
-
+import uuid
 
 def checkIsInt(value):
     try:
@@ -95,5 +95,27 @@ def stdoutEncode(data):
 def stdinEncode(data):
     try:
         return data.decode(sys.stdin.encoding).encode("utf8")
-    except:
+    except Exception:
         return data
+
+
+def get_random_filepath(userId, uuid_value):
+    if not uuid_value:
+        uuid_value = uuid.uuid4().hex
+    file_path = "/".join([digest3(userId), userId, digest2(uuid_value)])
+    return file_path
+
+
+def digest(value, mod):
+    b = 0
+    for char in value:
+        b += int(char, 16)
+    return str(b % mod)
+
+
+def digest2(value):
+    return digest(value, 100)
+
+
+def digest3(value):
+    return digest(value, 1000)
