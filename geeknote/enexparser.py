@@ -7,6 +7,10 @@ import os
 import re
 from lxml import etree
 import dateutil
+import dateutil.parser
+import hashlib
+import base64
+import pytz
 
 
 class EnNote:
@@ -15,6 +19,15 @@ class EnNote:
     def __init__(self, note):
         self._extract_note_info(note)
         self._note = note
+
+    @property
+    def tagNames(self):
+        return self.tags
+
+    def _parse_date(self, value):
+        # value = unicode(value)  #TODO avoid Unicode equal comparison failed
+        # https://stackoverflow.com/questions/21296475/python-dateutil-unicode-warning
+        return dateutil.parser.parse(value)
 
     def _extract_note_info(self, note):
         self.title = note.xpath('title')[0].text
@@ -27,30 +40,83 @@ class EnNote:
         if content:
             self.content = content[0].text
         else:
-            self.content = ''
+            self.content = ''  # no content?
 
         # attachements / files
         self.resources = []
         resources = note.xpath('resource')
         for resource in resources:
-            resource_info = {}
-            resource_info['filename'] = resource.xpath('resource-attributes/file-name')[0].text
-            # Base64 encoded data has new lines!
-            resource_info['data'] = re.sub(r'\n', '', resource.xpath('data')[0].text).strip()
-            resource_info['mime_type'] = resource.xpath('mime')[0].text
-            self.resources.append(resource_info)
+            self.resources.append(ENResource(resource))
 
     def _extract_dateval(self, note, date_field):
         if note.xpath(date_field):
-            return dateutil.parser.parse(note.xpath(date_field)[0].text)
+            date_value = note.xpath(date_field)[0].text
         else:
-            return dateutil.parser.parse('19700101T000017Z')
+            date_value = '19700101T000017Z'  #TODO if 'updated' then current date?
+        date_value = self._parse_date(date_value)
+        if date_value.tzinfo is None:
+            date_value = pytz.utc.localize(date_value)
+        return date_value
+
+    def get_resource_by_hash(self, hash):
+        for resource in self.resources:
+            if resource.hash == hash:
+                return resource
+        return None
+
+
+class ENResourceData:
+
+    def __init__(self, data):
+        data = re.sub(r'\n', '', data).strip()
+        self.body = base64.b64decode(data, altchars=None)  # , validate=True
+
+
+class ENResource:
+
+    def __init__(self, resource):
+        self._extract_resource_info(resource)
+
+    def _extract_resource_info(self, resource):
+        self.mime_type = resource.xpath('mime')[0].text
+        fn_node = resource.xpath('resource-attributes/file-name')
+        if fn_node:
+            self.filename = fn_node[0].text
+        else:
+            self.filename = 'unnamed'
+        # Base64 encoded data has new lines!
+        data_node = resource.xpath('data')[0]
+        data_encoding = data_node.attrib.get('encoding')
+        assert data_encoding == "base64"
+        self.data = ENResourceData(data_node.text)
+        self.hash = hashlib.md5(self.data.body).hexdigest()
+
+        """
+        additional resource info currently ignored / discarded:
+    ...
+        <width>72</width><height>36</height>
+        <recognition><![CDATA[<?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE recoIndex PUBLIC "SYSTEM" "http://xml.evernote.com/pub/recoIndex.dtd">
+            <recoIndex docType="unknown" objType="image" objID="eb75ae62c7ea56c17751b81b41a4f6c2" engineVersion="7.0.24.1" 
+                recoType="service" lang="de" objWidth="72" objHeight="36"><item x="1" y="0" w="71" h="15">
+                <t w="60">:divibib</t></item>
+                <item x="8" y="19" w="28" h="8"><t w="42">digitale</t><t w="34">digitate</t></item>
+                <item x="41" y="20" w="30" h="6"><t w="55">vIrtuellE</t><t w="40">vIrtuell</t><t w="35">vlttuellE</t><t w="26">vlnuellf</t><t w="24">vlnuene</t><t w="20">vIrtuell!</t><t w="18">virtue</t></item><item x="8" y="29" w="62" h="6"><t w="70">bibliotheken</t><t w="46">bibliothehr</t><t w="38">bibliothek en</t><t w="27">bibliothek e</t><t w="24">bib lio the ken</t><t w="21">bib lio the hr</t><t w="17">bib! i other</t><t w="16">bib! j other</t><t w="16">bib! jot her</t><t w="14">bib l i other</t></item></recoIndex>
+            ]]>
+        </recognition>
+        <resource-attributes>
+            <timestamp>20170504T185946Z</timestamp>
+            <file-name>24ac2d107f98bca1d444422b3c57813b.png</file-name>
+        </resource-attributes>
+    </resource>
+
+        """
 
 
 class EnexParser:
 
     def __init__(self, enex_file):
-        assert os.path.exists(self.enex_file), "missing %s" % repr(enex_file)
+        assert os.path.exists(enex_file), "missing %s" % repr(enex_file)
         self._enex_file = enex_file
 
     def parse(self):

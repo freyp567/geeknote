@@ -1,0 +1,63 @@
+"""
+handle images referenced by notes in mongodb
+"""
+
+import config
+
+import io
+from ftplib import FTP
+
+import logging
+logger = logging.getLogger("en2mongo.imagehandler")
+
+
+class ImageHandler:
+
+    def __init__(self):
+        self.ftp = FTP(config.FTP_HOST)
+        self.ftp.login(config.FTP_USER, config.FTP_PWD)
+
+    def upload_image(self, img_dir, img_name, img_data):
+        logger.debug("prepare image upload to %s", img_dir)
+        img_dir = self._prepare_upload_target(self.ftp, img_dir)
+        logger.debug("upload image '%s' to '%s'", img_name, img_dir)
+        fp = io.BytesIO(img_data)
+        img_path = "%s/%s" % (img_dir, img_name)
+        self.ftp.storbinary("STOR %s" % img_path, fp)
+        return img_path
+
+    def _prepare_upload_target(self, ftp, img_dir):
+        if not img_dir.startswith('files/'):
+            img_dir = 'files/' + img_dir
+        if not img_dir.endswith('/'):
+            img_dir += '/'
+
+        create_steps = []
+        dir_path = img_dir
+        while not ftp.nlst(dir_path):
+            create_steps.append(dir_path)
+            dir_path = dir_path[:-1]  # strip trailing slash
+            assert '/' in dir_path
+            dir_path = dir_path[:dir_path.rfind('/') + 1]
+
+        while create_steps:
+            dir_path = create_steps.pop()
+            retry = 5
+            while 1:
+                try:
+                    ftp.mkd(dir_path)
+                except Exception as err:
+                    # error_perm('550 Create directory operation failed.',)
+                    test = ftp.nlst(dir_path)
+                    if retry > 0:
+                        # session expired? unfortunately does not fix it
+                        self.ftp = FTP(config.FTP_HOST)
+                        self.ftp.login(config.FTP_USER, config.FTP_PWD)
+                        retry -= 1
+                    else:
+                        logger.error("ftp.mkd failed for %s %s", dir_path, err)
+                        raise RuntimeError("failed create directory %s to upload image " % dir_path)
+                else:
+                    break
+
+        return img_dir
