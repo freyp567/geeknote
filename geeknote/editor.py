@@ -218,8 +218,7 @@ class Editor(object):
                 contentHTML = markdown.markdown(content, extras=extras)
 
                 soup = BeautifulSoup(contentHTML, 'html.parser')
-                Editor.checklistInSoupToENML(soup)  #TODO also for raw markdown / ENML ?
-                # TODO option to convert markdown to ENML (hopefully lossless)
+                Editor.checklistInSoupToENML(soup)
                 contentHTML = str(soup)
             elif format == 'html':
                 # Html to ENML http://dev.evernote.com/doc/articles/enml.php
