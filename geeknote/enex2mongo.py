@@ -2,6 +2,8 @@
 """
 extract notes and related data from Evernote .enex 
 and import into mongodb
+
+note: should use note.guiid as base for lookup, but unfortunately do not have it in enex
 """
 
 import sys

@@ -662,7 +662,7 @@ class User(GeekNoteConnector):
                 out.successMessage("Default note extension is: %s" % getNoteExt(storage))
             else:
                 if len(note_ext.split(',')) == 2:
-                    storage.setUserprop('note_ext', note_ext.replace(" ",""))
+                    storage.setUserprop('note_ext', note_ext.replace(" ", ""))
                     out.successMessage("Changes saved.")
                 else:
                     out.failureMessage("Error in note extension, format is '.markdown, .org'")

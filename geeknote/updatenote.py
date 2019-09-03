@@ -8,6 +8,7 @@ from imagehandler import ImageHandler
 
 import re
 from pymongo import MongoClient
+import binascii
 import bson
 import uuid
 from datetime import datetime
@@ -45,15 +46,23 @@ class UpdateNote:
         return date_value
 
     def update(self, note):
-        db_note = self.db.notes.find_one({"Title": note.title})
+        note_created = self._get_note_timestamp(note.created)
+        cond = {
+            "$and": [
+                # check date created to handle duplicate note titles properly
+                {"CreatedTime": {"$eq": note_created}},
+                {"Title": note.title},  # TypeError: unhashable type: 'dict'
+            ]
+        }
+        db_note = self.db.notes.find_one(cond)
         if db_note is not None and db_note["IsDeleted"]:
             db_note = self._purge_note(db_note)
         if db_note is not None:
             note_updated = self._get_note_timestamp(note.updated)
-            force_update = False  # for debugging 
+            force_update = False  # for debugging
             db_note_updated = self._get_db_timestamp(db_note, 'UpdatedTime')
             if db_note_updated < note_updated or force_update:
-                logger.warning("note updated (or duplicate): '%s'\nupdated in db: %s\nupdated in en: %s", 
+                logger.warning("note updated: '%s'\nupdated in db: %s\nupdated in EN: %s",
                                note.title, db_note_updated.isoformat(), note_updated.isoformat())
                 self._update_db_note(db_note, note)
             else:
@@ -104,9 +113,8 @@ class UpdateNote:
             })
 
         noteId = bson.objectid.ObjectId()
-
         content = note.content
-        EN_NOTE_2 = '\<\!DOCTYPE\s+en-note\s+SYSTEM\s+"http://xml.evernote.com/pub/enml2.dtd"\>'
+        EN_NOTE_2 = '\<\!DOCTYPE\s+en-note\s+SYSTEM\s+"http://xml.evernote.com/pub/enml2.dtd"\>'  # noqa: W605
         assert re.search(EN_NOTE_2, content) is not None, "content format unsupported: %s" % content[:180]
 
         # Save images
@@ -115,7 +123,7 @@ class UpdateNote:
 
         if img_map:
             # update img src= in note content to match target location
-            logger.debug("update image refs in note %s", noteId)  
+            logger.debug("update image refs in note %s", noteId)
             content = self._fixup_img_refs(content, img_map)
 
         is_markdown = False
@@ -151,7 +159,7 @@ class UpdateNote:
             "Content": content,
             "CreatedTime": self._get_note_timestamp(note.created),
             "UpdatedTime": self._get_note_timestamp(note.updated),
-            "UpdatedUserId": self.user['_id'],  
+            "UpdatedUserId": self.user['_id'],
         })
 
         return db_note
@@ -251,12 +259,14 @@ class UpdateNote:
 
         db_tags = self.db.tags.find_one({'_id': user_id})
         if db_tags is None:
+            logger.debug("set tags for user: %s", user_tags)
             self.db.tags.insert_one({
                 "_id": user_id,
                 "Tags": list(user_tags)
             })
         if added:
             # update tag list for user; note: adding tags only
+            logger.debug("add new tags for user: %s", user_tags)
             self.db.tags.update_one({'_id': user_id}, {'$set': {'Tags': list(user_tags)}})
 
         removed = tag_names_db.difference(tag_names_new)
@@ -266,8 +276,9 @@ class UpdateNote:
 
         if added or removed:
             # update tag list of note
+            logger.debug("update tags for note: %s", tag_names_new)
             self.db.notes.update_one(
-                {'_id': db_note['_id']}, 
+                {'_id': db_note['_id']},
                 {"$set": {"Tags": list(tag_names_new)}}
             )
 
@@ -318,13 +329,72 @@ class UpdateNote:
         Updates mongodb note from EN note
         """
         content = note.content
-        #TODO implement note update
-        # similar to create: 
-        # update images / add new ones  (evtl drop removed ones)
-        # fix image refs (img / en-media)
-        # compare new and old content, if changed:
+        EN_NOTE_2 = '\<\!DOCTYPE\s+en-note\s+SYSTEM\s+"http://xml.evernote.com/pub/enml2.dtd"\>'
+        assert re.search(EN_NOTE_2, content) is not None, "content format unsupported: %s" % content[:180]
+        noteId = db_note["_id"]
+        db_note_created = self._get_db_timestamp(db_note, 'CreatedTime')
+        assert db_note_created == self._get_note_timestamp(note.created)  # ensure invariant
+        # must be invariant, otherwise followup later update will fail to lookup note as titles are not really unique
+
+        # Save images
+        imageList = self.get_images(content)
+        img_map = self._handle_images(noteId, note, imageList)
+
+        if img_map:
+            # update img src= in note content to match target location
+            logger.debug("update image refs in note %s", noteId)
+            content = self._fixup_img_refs(content, img_map)
+
+        # TODO purge removed images
+
+        usn = self._get_user_usn(self.user)
+        self.db.notes.update_one(
+            {
+                "_id": noteId
+            },
+            {
+                "$set": {
+                    "Title": note.title,
+                    "Desc": "",  # note.Desc,
+                    # "NotebookId": notebook_db['_id'],
+                    # "PublicTime":...
+                    # "RecommendTime":...
+                    "UpdatedTime": self._get_note_timestamp(note.updated),
+                    "UpdatedUserId": self.user['_id'],
+                    "UrlTitle": slugify(note.title),
+                    "UserId": self.user['_id'],
+                    "Usn": usn,
+                    # "ImgSrc": imgSrc,
+                    # "IsBlog": False,
+                    # "IsMarkdown": is_markdown,
+                    # "IsTrash": False,
+                    # "IsDeleted": False,
+                    # "ReadNum": db_notes["ReadNum"],  # preserve
+                }
+            }
+        )
+
         # create entry in note_content_histories with old note content
+        # TODO future
+
         # update note content
+        self.db.note_contents.update_one(
+            {
+                "_id": noteId,
+            },
+            {
+                "$set": {
+                    "UserId": self.user['_id'],
+                    # "IsBlog": False,
+                    "Content": content,
+                    "CreatedTime": self._get_note_timestamp(note.created),
+                    "UpdatedTime": self._get_note_timestamp(note.updated),
+                    "UpdatedUserId": self.user['_id'],
+                }
+            }
+        )
+
+        # note: note tags to be updated by caller
         return
 
     def _handle_images(self, noteId, note, imageList):
@@ -362,7 +432,7 @@ class UpdateNote:
                     "Size": len(resource.data.body),
                     "Type": "",
                     "Path": img_path,
-                    #"AlbumId": "52d3e8ac99c37b7f0d000001",  # TODO verify handling
+                    # "AlbumId": "52d3e8ac99c37b7f0d000001",  # TODO verify handling
                     # "IsDefaultAlbum": True,
                     "CreatedTime": self._get_note_timestamp(note.created),
                 })
@@ -384,10 +454,11 @@ class UpdateNote:
                 })
 
         for imageInfo in imageList:
-            resource = note.get_resource_by_hash(imageInfo['hash'])
+            binaryHash = binascii.unhexlify(imageInfo['hash'])
+            resource = note.get_resource_by_hash(binaryHash)
             if resource is None:
-                logger.warning("failed to match image by hash")
+                logger.warning("failed to match image by hash (%s)", imageInfo['hash'])
             else:
                 handle_image(resource)
-        
+
         return img_map
