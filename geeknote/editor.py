@@ -81,7 +81,7 @@ class Editor(object):
     def ENMLtoText(contentENML, format='default', imageOptions={'saveImages': False}, imageFilename=""):
         soup = BeautifulSoup(contentENML.decode('utf-8'), 'html.parser')
 
-        if format == 'markdown':
+        if format == 'preserve':
             # keep format for lossless backup
             return contentENML
 
@@ -219,6 +219,7 @@ class Editor(object):
 
                 soup = BeautifulSoup(contentHTML, 'html.parser')
                 Editor.checklistInSoupToENML(soup)  #TODO also for raw markdown / ENML ?
+                # TODO option to convert markdown to ENML (hopefully lossless)
                 contentHTML = str(soup)
             elif format == 'html':
                 # Html to ENML http://dev.evernote.com/doc/articles/enml.php
