@@ -66,7 +66,7 @@ setup(
     packages=['geeknote'],
 
     classifiers=[
-        'Development Status :: 3 - Alpha',
+        'Development Status :: 4 - Beta',
         'Intended Audience :: End Users/Desktop',
         'License :: OSI Approved :: GNU General Public License (GPL)',
         'Environment :: Console',
