@@ -5,6 +5,7 @@ verify_ssl = true
 
 [dev-packages]
 flake8 = "*"
+black = "*"
 
 [packages]
 evernote = ">=1.25"
@@ -23,3 +24,6 @@ pytz = "*"
 
 [requires]
 python_version = "2.7"
+
+[pipenv]
+allow_prereleases = true

@@ -64,6 +64,19 @@ class EnNote:
                 return resource
         return None
 
+    def load_content(self):
+        pass  # already extracted
+
+    def load_tags(self):
+        pass  # already extracted
+
+    def __getattr__(self, name):
+        # notfound = object()
+        # value = getattr(self, name, notfound)
+        # if value is notfound:
+        raise AttributeError(name)
+        # return value
+
 
 class ENResourceData:
 

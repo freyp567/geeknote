@@ -25,7 +25,7 @@ formatter = logging.Formatter('%(asctime)-15s : %(message)s')
 handler = logging.FileHandler(def_logpath)
 handler.setFormatter(formatter)
 
-logger = logging.getLogger("gnsyncm")
+logger = logging.getLogger("en2mongo")
 logger.setLevel(os.environ.get('LOGLEVEL') or logging.DEBUG)
 logger.addHandler(handler)
 logger.addHandler(logging.StreamHandler(sys.stderr))
@@ -95,9 +95,17 @@ class ENNoteObj:
     """ wrap NoteMetadata object (evernote.edam.notestore.ttypes.NoteMetadata) for mongo sync """
 
     def __init__(self, note, sleep_on_ratelimit):
-        self.gn = GeekNote(sleepOnRateLimit=sleep_on_ratelimit)
-        self.gn.loadNoteContent(note)
+        self.sleep_on_ratelimit = sleep_on_ratelimit
         self._note = note
+        self._note.content = None
+
+    def load_tags(self):
+        self.gn = GeekNote(sleepOnRateLimit=self.sleep_on_ratelimit)
+        self.gn.loadNoteTags(self._note)
+
+    def load_content(self):
+        self.gn = GeekNote(sleepOnRateLimit=self.sleep_on_ratelimit)
+        self.gn.loadNoteContent(self._note)
 
     def get_resource_by_hash(self, hash):
         guid = self._note.guid
@@ -147,11 +155,14 @@ class GNSyncM:
         """
         notebooks = GeekNote(sleepOnRateLimit=self.sleep_on_ratelimit).findNotebooks()
         assert notebook_name
+        notebook_name = notebook_name.lower()  # avoid troubles with case-sensitivity
 
-        notebook = [item for item in notebooks if item.name == notebook_name]
+        notebook = [item for item in notebooks if item.name.lower() == notebook_name]
         guid = None
         if notebook:
             guid = notebook[0].guid
+        else:
+            logger.warning("missing notebook %s", notebook_name)
 
         if not guid:
             notebook = GeekNote(sleepOnRateLimit=self.sleep_on_ratelimit).createNotebook(notebook_name)
@@ -187,6 +198,7 @@ class GNSyncM:
             note_obj = ENNoteObj(note, self.sleep_on_ratelimit)
             self.updater.update(note_obj)
 
+        self.updater.update_note_count()
         logger.info('Sync Complete')
 
     def _get_notes(self, changed_after=None):
@@ -196,8 +208,10 @@ class GNSyncM:
         gn = GeekNote(sleepOnRateLimit=self.sleep_on_ratelimit)
         if changed_after is not None:
             # limit number of notes to check
-            # keywords = 'created:' +changed_after.strftime("%Y%m%dT%H%M%SZ") # e.g. 'created:20070704T150000Z'
-            pass  # 'created:' does not work as expected
+            # keywords = 'created:' +changed_after.strftime("%Y%m%dT%H%M%SZ")
+            # e.g. 'created:20070704T150000Z'  # does not work as expected (in EN sandbox)
+            keywords = 'created:' + changed_after.strftime("%Y%m%d")  # e.g. 'created:20070704T20190801'
+            logger.info("restrict notes using filter: %s", keywords)
         return gn.findNotes(keywords, EDAM_USER_NOTES_MAX, notebookGuid=self.notebook_guid).notes
 
 
@@ -224,10 +238,10 @@ def main():
             changed_after = pytz.utc.localize(changed_after)
 
         if args.all:
-            for notebook in all_notebooks(sleep_on_ratelimit=args.sleep_on_ratelimit):
+            for notebook in all_notebooks(sleep_on_ratelimit=sleepOnRateLimit):
                 logger.info("Syncing notebook %s (%s)", notebook.name, notebook.guid)
                 GNS = GNSyncM(notebook.name, sleep_on_ratelimit=sleepOnRateLimit)
-                assert GNS.all_set, "troubles with GNSyncM initialization"
+                assert GNS.all_set, "GNSyncM initialization incomplete"
                 GNS.sync(changed_after)
         else:
             GNS = GNSyncM(notebook_name, sleep_on_ratelimit=sleepOnRateLimit)
@@ -235,6 +249,7 @@ def main():
             GNS.sync(changed_after)
 
     except (KeyboardInterrupt, SystemExit, tools.ExitException):
+        #import traceback; traceback.print_exc()
         logger.warning("sync interrupted, incomplete")
 
     except Exception:

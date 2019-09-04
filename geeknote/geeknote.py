@@ -250,6 +250,7 @@ class GeekNote(object):
         """ WORK WITH NOTES """
         noteFilter = NoteStore.NoteFilter(order=Types.NoteSortOrder.RELEVANCE)
         noteFilter.order = getattr(Types.NoteSortOrder, self.noteSortOrder)
+        noteFilter.timeZone = 'UTC'
         if createOrder:
             noteFilter.order = Types.NoteSortOrder.CREATED
 
@@ -299,14 +300,26 @@ class GeekNote(object):
                             "instance of Note, '%s' given." % type(note))
 
         note.content = self.getNoteStore().getNoteContent(self.authToken, note.guid)
+        self.loadNoteTags(note)
+
+    @EdamException
+    def loadNoteTags(self, note):
+        """ modify Note object, fetch tags """
+        if not isinstance(note, object):
+            raise Exception("Note content must be an "
+                            "instance of Note, '%s' given." % type(note))
+
         # fill the tags in
         if note.tagGuids and not getattr(note, 'tagNames', None):
             note.tagNames = []
             for guid in note.tagGuids:
                 tag = self.getNoteStore().getTag(self.authToken, guid)
                 note.tagNames.append(tag.name)
+        else:
+            # note without tags
+            note.tagNames = []
 
-        note.notebookName = self.getNoteStore().getNotebook(self.authToken, note.notebookGuid).name
+        note.notebookName = self.getNoteStore().getNotebook(self.authToken, note.notebookGuid).name  # TODO lazy load
 
     @EdamException
     def loadLinkedNoteContent(self, note):

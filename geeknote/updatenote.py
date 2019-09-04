@@ -19,6 +19,7 @@ from bs4 import BeautifulSoup
 import logging
 logger = logging.getLogger("en2mongo.updatenote")
 
+DATE_INVALID_BEFORE = datetime(1990, 01, 01)
 
 class UpdateNote:
 
@@ -43,32 +44,86 @@ class UpdateNote:
         date_value = db_note[field_name]
         if date_value.tzinfo is None:
             date_value = pytz.utc.localize(date_value)
+        invalid_before = pytz.utc.localize(DATE_INVALID_BEFORE)
+        if date_value < invalid_before:
+            # caused by difference for date updated in .enex vs EN API
+            return None
         return date_value
 
-    def update(self, note):
+    def _lookup_db_note(self, note):
+        """ lookup equivalent note in mongodb """
         note_created = self._get_note_timestamp(note.created)
         cond = {
             "$and": [
                 # check date created to handle duplicate note titles properly
                 {"CreatedTime": {"$eq": note_created}},
-                {"Title": note.title},  # TypeError: unhashable type: 'dict'
+                {"Title": note.title},
             ]
         }
         db_note = self.db.notes.find_one(cond)
-        if db_note is not None and db_note["IsDeleted"]:
+        if db_note is None:
+            cond = {"Title": note.title}
+            db_note = self.db.notes.find_one(cond)
+            if db_note is not None:
+                db_note_created = self._get_db_timestamp(db_note, 'CreatedTime')
+                delta_created = self._compare_timestamps(note_created, db_note_created)
+                if delta_created >= 0:
+                    # happens, e.g. '2019-08-21T13:36:55+00:00' vs '2019-08-21T13:36:56+00:00' - assume rounding issue
+                    logger.debug("found note with nearly equal CreatedTime: %s (%s)", note.title, delta_created)
+                else:
+                    logger.warning("found note with different CreatedTime: %s\ncreated in EN: %s\ncreated in db: %s", 
+                                   note.title, note_created.isoformat(), db_note_created.isoformat())
+                    db_note = None  # ignore, create new note
+        return db_note
+
+    def _compare_timestamps(self, first, second):
+        """ return 0 if equal, > 0 (= seconds difference) if nearly equal, or -1 if timestamps different """
+        if second is None:
+            if first is not None:
+                return -1
+            else:
+                return 0  # both not set?
+        elif first is None:
+            return -1  # second not None
+        time_delta = abs((first - second).total_seconds())
+        if time_delta == 0.0:
+            return 0.0
+        if time_delta == 1.0:
+            # happens, e.g. '2019-08-21T13:36:55+00:00' vs '2019-08-21T13:36:56+00:00' - assume rounding issue
+            return time_delta
+        if time_delta < 5.0:  # more than 1 second possible?
+            # 
+            return time_delta
+        else:
+            return -1
+
+    def update(self, note):
+        """ update note in mongodb from EN note if missing or updated """
+        db_note = self._lookup_db_note(note)
+        if db_note is not None and db_note["IsDeleted"]:  # TODO deleted in EN?
             db_note = self._purge_note(db_note)
         if db_note is not None:
             note_updated = self._get_note_timestamp(note.updated)
-            force_update = False  # for debugging
+            force_update = False  # args.force_update
             db_note_updated = self._get_db_timestamp(db_note, 'UpdatedTime')
-            if db_note_updated < note_updated or force_update:
+            if db_note_updated is None and note_updated is not None:
+                # handle differences .enex vs EN api for date updated
+                db_note_updated = self._get_db_timestamp(db_note, 'CreatedTime')
+            delta_updated = self._compare_timestamps(note_updated, db_note_updated)
+
+            if delta_updated < 0 or force_update:
                 logger.warning("note updated: '%s'\nupdated in db: %s\nupdated in EN: %s",
-                               note.title, db_note_updated.isoformat(), note_updated.isoformat())
+                               note.title, 
+                               db_note_updated and db_note_updated.isoformat() or '(unknown)',
+                               note_updated and note_updated.isoformat() or '(unknown)',
+                               )
+                note.load_content()
                 self._update_db_note(db_note, note)
             else:
                 logger.debug("note unchanged: '%s'", note.title)
 
         else:  # new note
+            note.load_content()
             db_note = self._create_db_note(note)
 
         self._update_tags(db_note, note)
@@ -76,12 +131,16 @@ class UpdateNote:
     def _get_note_timestamp(self, timestamp):
         """ convert timestamp to mongodb timestamp """
         if isinstance(timestamp, datetime):
-            pass
+            if timestamp.tzinfo is None:
+                # avoid TypeError: can't compare offset-naive and offset-aware datetimes
+                timestamp = pytz.utc.localize(timestamp)
         else:
-            timestamp = datetime.fromtimestamp(timestamp / 1000.0)  # timezone awareness??
-        if timestamp.tzinfo is None:
-            # avoid TypeError: can't compare offset-naive and offset-aware datetimes
-            timestamp = pytz.utc.localize(timestamp)
+            timestamp = datetime.utcfromtimestamp(timestamp / 1000.0)
+            if timestamp < DATE_INVALID_BEFORE:
+                # 1.1.1970 (around) means date not known / set
+                # have no dates < 1990 so assume all dates before are invalid
+                return None
+            timestamp = pytz.utc.localize(timestamp)  
         return timestamp
 
     def _purge_note(self, db_note):
@@ -111,7 +170,9 @@ class UpdateNote:
                 "IsDeleted": False,
                 "Usn": usn,
             })
+            notebook_db = self.db.notebooks.find_one({"Title": self.notebook_name})
 
+        assert notebook_db is not None, "must have notebook to sync to"
         noteId = bson.objectid.ObjectId()
         content = note.content
         EN_NOTE_2 = '\<\!DOCTYPE\s+en-note\s+SYSTEM\s+"http://xml.evernote.com/pub/enml2.dtd"\>'  # noqa: W605
@@ -138,6 +199,7 @@ class UpdateNote:
             "CreatedTime": self._get_note_timestamp(note.created),
             "UpdatedTime": self._get_note_timestamp(note.updated),
             "UpdatedUserId": self.user['_id'],
+            "SyncedTime": datetime.utcnow().replace(tzinfo=pytz.utc),
             "UrlTitle": slugify(note.title),
             "UserId": self.user['_id'],
             "Usn": usn,
@@ -163,6 +225,13 @@ class UpdateNote:
         })
 
         return db_note
+
+
+    def update_note_count(self):
+        notebook_db = self.db.notebooks.find_one({"Title": self.notebook_name})
+        if notebook_db:
+            self._update_note_count(notebook_db)
+
 
     def _update_note_count(self, notebook):
         """ update notes count for given notebook """
@@ -240,6 +309,7 @@ class UpdateNote:
 
     def _update_tags(self, db_note, note):
         """ update tags """
+        note.load_tags()
         user_id = db_note['UserId']
         user = self.db.users.find_one({"_id": user_id})
         assert user is not None, 'must have user to update tags'
@@ -360,6 +430,7 @@ class UpdateNote:
                     # "PublicTime":...
                     # "RecommendTime":...
                     "UpdatedTime": self._get_note_timestamp(note.updated),
+                    "SyncedTime": datetime.utcnow().replace(tzinfo=pytz.utc),
                     "UpdatedUserId": self.user['_id'],
                     "UrlTitle": slugify(note.title),
                     "UserId": self.user['_id'],

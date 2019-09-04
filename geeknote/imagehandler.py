@@ -48,14 +48,21 @@ class ImageHandler:
                     ftp.mkd(dir_path)
                 except Exception as err:
                     # error_perm('550 Create directory operation failed.',)
-                    test = ftp.nlst(dir_path)
+                    # happens under not yet determined circumstances, although directory could be created successfull
+                    # double-check to avoid false positive errors
+                    pardir = '/'.join(dir_path.rsplit('/')[:-2])
+                    subdir = dir_path.rsplit('/')[-2]
+                    test = [d for d in ftp.nlst(pardir) if d.endswith('/' + subdir)]
+                    if test:
+                        logger.warning("rtp reported error creating %s, but exists", dir_path)
+                        break
+                    logger.error("ftp.mkd failed for %s %s", dir_path, err)
                     if retry > 0:
                         # session expired? unfortunately does not fix it
                         self.ftp = FTP(config.FTP_HOST)
                         self.ftp.login(config.FTP_USER, config.FTP_PWD)
                         retry -= 1
                     else:
-                        logger.error("ftp.mkd failed for %s %s", dir_path, err)
                         raise RuntimeError("failed create directory %s to upload image " % dir_path)
                 else:
                     break
