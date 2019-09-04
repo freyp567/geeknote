@@ -20,6 +20,8 @@ import logging
 logger = logging.getLogger("en2mongo.updatenote")
 
 DATE_INVALID_BEFORE = datetime(1990, 01, 01)
+DATE_EQUAL_DELTA = 2.0
+
 
 class UpdateNote:
 
@@ -42,6 +44,8 @@ class UpdateNote:
 
     def _get_db_timestamp(self, db_note, field_name):
         date_value = db_note[field_name]
+        if date_value is None:
+            return None
         if date_value.tzinfo is None:
             date_value = pytz.utc.localize(date_value)
         invalid_before = pytz.utc.localize(DATE_INVALID_BEFORE)
@@ -73,7 +77,7 @@ class UpdateNote:
                 else:
                     logger.warning("found note with different CreatedTime: %s\ncreated in EN: %s\ncreated in db: %s", 
                                    note.title, note_created.isoformat(), db_note_created.isoformat())
-                    db_note = None  # ignore, create new note
+                    db_note = None  # not same, so create new note
         return db_note
 
     def _compare_timestamps(self, first, second):
@@ -91,8 +95,8 @@ class UpdateNote:
         if time_delta == 1.0:
             # happens, e.g. '2019-08-21T13:36:55+00:00' vs '2019-08-21T13:36:56+00:00' - assume rounding issue
             return time_delta
-        if time_delta < 5.0:  # more than 1 second possible?
-            # 
+        if time_delta < DATE_EQUAL_DELTA:  # more than 1 second possible?
+            logger.warning("detected date equality gab of %s", time_delta)
             return time_delta
         else:
             return -1
@@ -104,6 +108,8 @@ class UpdateNote:
             db_note = self._purge_note(db_note)
         if db_note is not None:
             note_updated = self._get_note_timestamp(note.updated)
+            if note_updated is None:
+                note_updated = self._get_note_timestamp(note.created)
             force_update = False  # args.force_update
             db_note_updated = self._get_db_timestamp(db_note, 'UpdatedTime')
             if db_note_updated is None and note_updated is not None:
@@ -134,6 +140,10 @@ class UpdateNote:
             if timestamp.tzinfo is None:
                 # avoid TypeError: can't compare offset-naive and offset-aware datetimes
                 timestamp = pytz.utc.localize(timestamp)
+            if timestamp < pytz.utc.localize(DATE_INVALID_BEFORE):
+                # date not known / set
+                # have no dates < 1990 so assume all dates before are invalid
+                return None
         else:
             timestamp = datetime.utcfromtimestamp(timestamp / 1000.0)
             if timestamp < DATE_INVALID_BEFORE:
@@ -154,7 +164,7 @@ class UpdateNote:
         """
         Creates mongodb note from EN note
         """
-        logger.info("create new note '%s' in %s", note.title, self.notebook_name)
+        logger.info('create new note "%s" in %s', note.title, self.notebook_name)
         notebook_db = self.db.notebooks.find_one({"Title": self.notebook_name})
 
         # in transaction?
@@ -175,8 +185,12 @@ class UpdateNote:
         assert notebook_db is not None, "must have notebook to sync to"
         noteId = bson.objectid.ObjectId()
         content = note.content
-        EN_NOTE_2 = '\<\!DOCTYPE\s+en-note\s+SYSTEM\s+"http://xml.evernote.com/pub/enml2.dtd"\>'  # noqa: W605
-        assert re.search(EN_NOTE_2, content) is not None, "content format unsupported: %s" % content[:180]
+        EN_NOTE_2 = '\<\!DOCTYPE\s+en-note\s+SYSTEM\s+"http://xml.evernote.com/pub/enml2.dtd"\s*\>'  # noqa: W605
+        EN_NOTE_1 = '\<\!DOCTYPE\s+en-note\s+SYSTEM\s+"http://xml.evernote.com/pub/enml.dtd"\s*\>'  # noqa: W605
+        if re.search(EN_NOTE_2, content, re.MULTILINE+re.DOTALL) is None:
+            # note created 2019-10 using enml.dtd
+            if re.search(EN_NOTE_1, content, re.MULTILINE+re.DOTALL) is None:
+                raise ValueError("content format unsupported: %s" % content[:180])
 
         # Save images
         imageList = self.get_images(content)
@@ -236,7 +250,7 @@ class UpdateNote:
     def _update_note_count(self, notebook):
         """ update notes count for given notebook """
         note_count = self.db.notes.count_documents({'NotebookId': notebook['_id']})
-        logger.info("update notebook note count to %s", note_count)
+        logger.debug("update notebook note count to %s", note_count)
         self.db.notebook.update_one(
             {"_id": notebook['_id']},
             {"$set": {"NumberNotes": note_count}}
@@ -336,7 +350,7 @@ class UpdateNote:
             })
         if added:
             # update tag list for user; note: adding tags only
-            logger.debug("add new tags for user: %s", user_tags)
+            # logger.debug("add new tags for user: %s", user_tags) #blather
             self.db.tags.update_one({'_id': user_id}, {'$set': {'Tags': list(user_tags)}})
 
         removed = tag_names_db.difference(tag_names_new)
@@ -403,8 +417,16 @@ class UpdateNote:
         assert re.search(EN_NOTE_2, content) is not None, "content format unsupported: %s" % content[:180]
         noteId = db_note["_id"]
         db_note_created = self._get_db_timestamp(db_note, 'CreatedTime')
-        assert db_note_created == self._get_note_timestamp(note.created)  # ensure invariant
-        # must be invariant, otherwise followup later update will fail to lookup note as titles are not really unique
+        note_created = self._get_note_timestamp(note.created)
+        delta = self._compare_timestamps(note_created, db_note_created)
+        if delta < 0:
+            # must be invariant, otherwise followup later update will fail to lookup note as titles are not really unique
+            logger.error('failed to update note "%s", date created mismatch\nin db: %s\nin EN: %s', 
+                         note.title,
+                         db_note_created and db_note_created.isoformat() or '(not set)',
+                         note_created and note_created.isoformat() or '(not set)',
+                         )
+            return
 
         # Save images
         imageList = self.get_images(content)

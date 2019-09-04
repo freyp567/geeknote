@@ -24,7 +24,7 @@ def setup_logger():
     handler.setFormatter(formatter)
 
     logger = logging.getLogger("en2mongo")
-    logger.setLevel(os.environ.get('LOGLEVEL') or logging.DEBUG)
+    logger.setLevel(os.environ.get('LOGLEVEL') or logging.INFO)
     logger.addHandler(handler)
     logger.addHandler(logging.StreamHandler(sys.stderr))
     return logger
@@ -40,23 +40,37 @@ def get_argparse():
     return parser
 
 
+def update_notebook(enex_path, notebook_name):
+    updater = UpdateNote(notebook_name)
+    enex_parser = EnexParser(enex_path)
+    for note in enex_parser.parse():
+        # add or update note in mongodb
+        updater.update(note)
+
 def main():
     arg_parser = get_argparse()
     args = arg_parser.parse_args()
     logger.info("run enex2mongo with args: %s", args)
 
-    note = None
-    notebook_name = args.notebook
-    updater = UpdateNote(notebook_name)
+    notebook_name = '(loading)'
     try:
-        enex_parser = EnexParser(args.input)
-        for note in enex_parser.parse():
-            # add or update note in mongodb
-            updater.update(note)
+        enex_path = args.input
+        if os.path.isdir(enex_path):
+            # import all .enex files in given directory
+            enex_dir = enex_path
+            enex_files = [fn for fn in os.listdir(enex_dir) if fn.endswith('.enex')]
+            for enex_file in enex_files:
+                # assume .enex file name matches notebook name (MUST, dont know how to map otherwise)
+                notebook_name = os.path.splitext(os.path.basename(enex_file))[0]
+                enex_path = os.path.join(enex_dir, enex_file)
+                update_notebook(enex_path, notebook_name)
+        else:
+            notebook_name = args.notebook
+            update_notebook(enex_path, notebook_name)
         logger.info("enex2mongo succeeded")
 
     except Exception as err:
-        logger.exception("enex2mongo failed - %s" % err)
+        logger.exception("enex2mongo failed syncing %s - %s", notebook_name, err)
         sys.exit(1)
     return
 

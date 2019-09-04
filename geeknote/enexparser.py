@@ -46,7 +46,9 @@ class EnNote:
         self.resources = []
         resources = note.xpath('resource')
         for resource in resources:
-            self.resources.append(ENResource(resource))
+            resource_obj = ENResource(resource)
+            if resource_obj.data:
+                self.resources.append(resource_obj)
 
     def _extract_dateval(self, note, date_field):
         if note.xpath(date_field):
@@ -91,6 +93,7 @@ class ENResource:
         self._extract_resource_info(resource)
 
     def _extract_resource_info(self, resource):
+        self.data = self.hasn = None
         self.mime_type = resource.xpath('mime')[0].text
         fn_node = resource.xpath('resource-attributes/file-name')
         if fn_node:
@@ -100,7 +103,11 @@ class ENResource:
         # Base64 encoded data has new lines!
         data_node = resource.xpath('data')[0]
         data_encoding = data_node.attrib.get('encoding')
-        assert data_encoding == "base64"
+        if data_encoding != "base64":
+            # rarely, but happending
+            assert data_encoding is None, "unknown data encoding: %s" % data_encoding
+            # logger.error("unsupported data encoding: %s" % data_encoding)
+            return
         self.data = ENResourceData(data_node.text)
         self.hash = hashlib.md5(self.data.body).hexdigest()
 
@@ -134,8 +141,9 @@ class EnexParser:
 
     def parse(self):
         try:
-            parser = etree.XMLParser(huge_tree=True)
-            xml_tree = etree.parse(self._enex_file, parser)
+            parser = etree.XMLParser(huge_tree=True, resolve_entities=False)
+            data = self._enex_file
+            xml_tree = etree.parse(data, parser)
         except (etree.XMLSyntaxError, ) as exc:
             raise ValueError("syntax error in enex file: %s" % exc)
 
