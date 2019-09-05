@@ -37,6 +37,8 @@ SEARCH_TERMS = (
     u"see",  # expect 4056, found 2896
     u"this",  # 12736 = all notes in EN, found 3887
     u"der",  # 3856 (non stopword in EN, lang is english) - 0 found, is stopword in MongoDB (with language=german)
+    u'Postgres',  # expect 507, found 238
+    u'"Postgres version 0"',  # largest note in EN
 )
 # TODO read search terms (and expectation) from external config
 # or check search result using EN api
