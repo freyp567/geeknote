@@ -112,26 +112,29 @@ class SearchContentRegex(SearchSpecBase):
 class SearchContentRegex2(SearchSpecBase):
 
     def info(self):
-        return 'ContentRegex'
+        return 'ContentRegex2'
 
     def prepare(self):
         # speedup using combined fulltext and regex search? see
         # https://medium.com/statuscode/how-to-speed-up-mongodb-regex-queries-by-a-factor-of-up-to-10-73995435c606
         collection = self.get_collection()
-        index = pymongo.IndexModel(('Content', pymongo.TEXT))
-        collection.create_index([index, ], name='note_content', default_language='german')
+        # index = pymongo.IndexModel([('Content', pymongo.TEXT), ])
+        # collection.create_index(index, name='note_content', default_language='german')  # fails
+        index = [('Content', pymongo.TEXT)]  
+        collection.create_index(index, name='note_content', default_language='german')
 
     def get_collection(self):
         return self.db.note_contents
 
     def build_query(self, search_term):
-        regx = bson.regex.Regex(".*%s.*" % re.escape(search_term))  # split search_term into workds?
+        regex_match = {"$regex": "|".join([re.escape(word) for word in search_term.split()])}
         query = {
             "$and": [
                 {"$text": {"$search": search_term}},
-                {"$cast": {"$elemMatch": regx}}
+                {"Content": {"$elemMatch": regex_match}}
             ]
         }
+        # ATTN does not work as expected / described  -- use aggregate pipeline instead?
         return query
 
 
@@ -143,7 +146,6 @@ class SearchContentFulltext(SearchSpecBase):
     def prepare(self):
         collection = self.get_collection()
         index = [('Content', pymongo.TEXT)]  
-        # use pymongo.IndexModel?
         collection.create_index(index, name='note_content', default_language='german')
         # TODO fix SyntaxError: Invalid Syntax
 
@@ -153,13 +155,19 @@ class SearchContentFulltext(SearchSpecBase):
     def build_query(self, search_term):
         # TODO verify / precodition (but done otherplace):
         # db.note_contents.createIndex( { name: "Content", description: "note fulltext" } )
-        query = {"$text": {"$search": search_term}}
+        query = {"$text": 
+        {
+            "$search": search_term,
+            # "$language": 
+            # "$caseSensitive":
+            # "$diacrticSensitive": 
+        }}
         return query
 
 
-# TODO allow to select using arguments 'ContentRegex', 'ContentFulltext', 'TitleContains'
+# TODO allow to select using arguments 'ContentRegex2', 'ContentFulltext', 'TitleContains'
 # SEARCH_SPEC = SearchTitleContains
-# SEARCH_SPEC = SearchContentRegex
+#SEARCH_SPEC = SearchContentRegex2  # ATTN does not work
 SEARCH_SPEC = SearchContentFulltext
 
 
@@ -249,7 +257,9 @@ def main():
 
     # output summary of search results
     search_info = SEARCH_SPEC(search_note.db).info()
-    result_path = 'search_notes.%s.%s.csv' % (search_info, datetime.now().strftime('%Y-%m-%dT%H%M'))
+    if not os.path.isdir("search_notes"):
+        os.mkdir('search_notes')
+    result_path = 'search_notes\\%s.%s.csv' % (search_info, datetime.now().strftime('%Y-%m-%dT%H%M'))
     open(result_path +'.txt', 'w').write('search result summary for %s\n%s\n' % (search_info, datetime.now().isoformat()))
     columns = ('term', 'count', 'dTfind', 'dTfetch')
     with open(result_path, 'w') as csv_file:

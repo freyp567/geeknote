@@ -51,3 +51,4 @@ config/
 debug/
 config/database.db
 config/error.log
+search_notes/
