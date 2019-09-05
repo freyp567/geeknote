@@ -21,6 +21,7 @@ python-slugify = "*"
 pymongo = "*"
 python-dateutil = "*"
 pytz = "*"
+unicodecsv = "*"
 
 [requires]
 python_version = "2.7"
