@@ -19,7 +19,7 @@ import logging
 
 SEARCH_TERMS = (
     # TODO read search terms (and expectation) from external config
-    u'Karawane',
+    u'Karawane',  # expect 14 notes
     u'Alexander der Große',
     u'Haefs',  # expect 4 notes
     u'Gablé',  # expect 17 notes
@@ -94,12 +94,9 @@ class SearchContentRegex(SearchSpecBase):
 
     def prepare(self):
         # coll = self.get_collection()
-        # TODO check if index already exists? ensure_index is deprecated - and alias to create_index
         # coll.create_index({'Content': 1}, background=False)
-        # but regex with left truncation: able to use index?
+        # but regex with left truncation is unable to use the index
         pass
-        # speedup using combined fulltext and regex search? see
-        # https://medium.com/statuscode/how-to-speed-up-mongodb-regex-queries-by-a-factor-of-up-to-10-73995435c606
 
     def get_collection(self):
         return self.db.note_contents
@@ -112,6 +109,32 @@ class SearchContentRegex(SearchSpecBase):
         return query
 
 
+class SearchContentRegex2(SearchSpecBase):
+
+    def info(self):
+        return 'ContentRegex'
+
+    def prepare(self):
+        # speedup using combined fulltext and regex search? see
+        # https://medium.com/statuscode/how-to-speed-up-mongodb-regex-queries-by-a-factor-of-up-to-10-73995435c606
+        collection = self.get_collection()
+        index = pymongo.IndexModel(('Content', pymongo.TEXT))
+        collection.create_index([index, ], name='note_content', default_language='german')
+
+    def get_collection(self):
+        return self.db.note_contents
+
+    def build_query(self, search_term):
+        regx = bson.regex.Regex(".*%s.*" % re.escape(search_term))  # split search_term into workds?
+        query = {
+            "$and": [
+                {"$text": {"$search": search_term}},
+                {"$cast": {"$elemMatch": regx}}
+            ]
+        }
+        return query
+
+
 class SearchContentFulltext(SearchSpecBase):
 
     def info(self):
@@ -119,7 +142,8 @@ class SearchContentFulltext(SearchSpecBase):
 
     def prepare(self):
         collection = self.get_collection()
-        index = [('Content', pymongo.TEXT)]
+        index = [('Content', pymongo.TEXT)]  
+        # use pymongo.IndexModel?
         collection.create_index(index, name='note_content', default_language='german')
         # TODO fix SyntaxError: Invalid Syntax
 
@@ -129,7 +153,7 @@ class SearchContentFulltext(SearchSpecBase):
     def build_query(self, search_term):
         # TODO verify / precodition (but done otherplace):
         # db.note_contents.createIndex( { name: "Content", description: "note fulltext" } )
-        query = {"$text": {"contents": search_term}}
+        query = {"$text": {"$search": search_term}}
         return query
 
 
@@ -160,16 +184,23 @@ class SearchNote:
     def search(self, search_term, search_spec):
         LOGGER.info('searching for "%s" in %s', encode_log(search_term), search_spec.info())
         query = search_spec.build_query(search_term)
-        start = datetime.now()
         collection = search_spec.get_collection()
+        start = datetime.now()
         result = collection.find(query)
         result_count = result.count()  # experience long delay with regex search
         duration = datetime.now() - start
         if result_count:
             LOGGER.info('found %s notes (in %s) dT=%.2f',
                         result_count, search_spec.info(), duration.total_seconds())
-            for note in result:
-                LOGGER.debug('+ "%s"', encode_log(note["Title"]))
+            for doc in result:
+                if 'Title' in doc:
+                    note = doc
+                else:
+                    # have note_contents document, need to lookup note (metadata)
+                    note = self.db.notes.find_one({'_id': doc['_id']})
+                    assert note is not None
+                notebook = self.db.notebooks.find_one({'_id': note['NotebookId'] })
+                LOGGER.debug('+ "%s" in "%s"', encode_log(note["Title"]), notebook['Title'])
             duration2 = datetime.now() - start  # takes very long with regex finds
         else:
             duration2 = datetime.now() - start
