@@ -1,9 +1,14 @@
 evernote>=1.25
 html2text
+#SQLAlchemy
 sqlalchemy
 markdown2
 thrift
 beautifulsoup4
 proxyenv
-pysqlite
+pysqlite3
 lxml
+python-slugify
+pymongo
+python-dateutil
+pytz
