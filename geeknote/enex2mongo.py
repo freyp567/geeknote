@@ -4,11 +4,16 @@ extract notes and related data from Evernote .enex
 and import into mongodb
 
 note: should use note.guiid as base for lookup, but unfortunately do not have it in enex
+
+TODO:
++ fix image handling, have too many "failed to match image by hash"
++ seen tag removal during repated sync, to be verified - normalization issues?
++ automatically add notebook name if not set as tag - for easier searching on MongoDB level
+
 """
 
 import sys
 import os
-import traceback
 import argparse
 from enexparser import EnexParser
 from updatenote import UpdateNote
@@ -32,6 +37,7 @@ def setup_logger():
 
 logger = setup_logger()
 
+
 def get_argparse():
     parser = argparse.ArgumentParser()
     parser.add_argument('input', help='enex file to import from')
@@ -46,6 +52,7 @@ def update_notebook(enex_path, notebook_name):
     for note in enex_parser.parse():
         # add or update note in mongodb
         updater.update(note)
+
 
 def main():
     arg_parser = get_argparse()
@@ -73,6 +80,7 @@ def main():
         logger.exception("enex2mongo failed syncing %s - %s", notebook_name, err)
         sys.exit(1)
     return
+
 
 if __name__ == "__main__":
     main()
