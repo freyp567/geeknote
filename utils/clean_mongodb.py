@@ -9,7 +9,6 @@ import argparse
 import logging
 
 from pymongo import MongoClient
-import bson
 
 from geeknote import config
 
