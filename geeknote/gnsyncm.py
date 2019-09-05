@@ -120,7 +120,6 @@ class ENNoteObj:
         return value
 
 
-
 class GNSyncM:
     """ sync application targeting mongodb """
 
@@ -187,7 +186,7 @@ class GNSyncM:
         notes = self._get_notes(changed_after)
         logger.info("found %s notes to be synced", len(notes))
         for note in notes:
-            if changed_after is not None:  
+            if changed_after is not None:
                 # to be handled by findNote, but for time beeing isnt
                 note_changed = self.updater._get_note_timestamp(note.updated or note.created)
                 if note_changed < changed_after:
@@ -249,12 +248,13 @@ def main():
             GNS.sync(changed_after)
 
     except (KeyboardInterrupt, SystemExit, tools.ExitException):
-        #import traceback; traceback.print_exc()
+        # import traceback; traceback.print_exc()
         logger.warning("sync interrupted, incomplete")
 
     except Exception:
         logger.exception("gnsync failed")
         return
+
 
 if __name__ == "__main__":
     main()
