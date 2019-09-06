@@ -45,7 +45,7 @@ class CleanMongoDB:
         self.db.note_contents.remove({})
         logger.info("removing %s note_content_histories ...", self.db.note_content_histories.count())
         self.db.note_content_histories.remove({})
-        logger.info("removing %ss notes ...", self.db.notes.count())
+        logger.info("removing %s notes ...", self.db.notes.count())
         self.db.notes.remove({})
         logger.info("removing %s share_notes ...", self.db.share_notes.count())
         self.db.share_notes.remove({})
