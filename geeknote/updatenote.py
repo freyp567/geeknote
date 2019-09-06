@@ -11,7 +11,7 @@ from pymongo import MongoClient
 import binascii
 import bson
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 from slugify import slugify
 from bs4 import BeautifulSoup
@@ -20,14 +20,16 @@ import logging
 logger = logging.getLogger("en2mongo.updatenote")
 
 DATE_INVALID_BEFORE = datetime(1990, 01, 01)
+DATE_INVALID_YEAR = 1970
 DATE_EQUAL_DELTA = 2.0
 
 
 class UpdateNote:
 
-    def __init__(self, notebook_name):
+    def __init__(self, notebook_name, force_update=False):
         assert notebook_name, 'must have notebook name, cannot determine from .enex'
         self.notebook_name = notebook_name.lower()
+        self.force_update = force_update
         self.mongo_client = MongoClient(
             config.DB_URI,
             tz_aware=False,
@@ -36,11 +38,30 @@ class UpdateNote:
         self.db = self.mongo_client[config.DB_NAME]
         self.authenticate()
         self.imghandler = ImageHandler()
+        self._select_notebook(self.notebook_name)
 
     def authenticate(self):
         """ authenticate using preconfigured user """
         self.user = self.db.users.find_one({"Username": config.DB_USERNAME})
         assert self.user is not None, "failed to lookup db user %s" % config.DB_USERNAME
+
+    def _select_notebook(self, notebook_name):
+        notebook_db = self.db.notebooks.find_one({"Title": self.notebook_name})
+        if notebook_db is None:
+            # create new notebook for given name
+            usn = self._get_user_usn(self.user)
+            self.db.notebooks.insert_one({
+                "Title": notebook_name,
+                "UrlTitle": slugify(notebook_name),
+                "NumberNotes": 0,
+                "Seq": -1,
+                "UserId": self.user['_id'],
+                "IsDeleted": False,
+                "Usn": usn,
+            })
+            notebook_db = self.db.notebooks.find_one({"Title": self.notebook_name})
+            assert notebook_db is not None
+        self._db_notebook = notebook_db
 
     def _get_db_timestamp(self, db_note, field_name):
         date_value = db_note[field_name]
@@ -57,27 +78,34 @@ class UpdateNote:
     def _lookup_db_note(self, note):
         """ lookup equivalent note in mongodb """
         note_created = self._get_note_timestamp(note.created)
+        rounded = timedelta(seconds=2)
         cond = {
             "$and": [
-                # check date created to handle duplicate note titles properly
-                {"CreatedTime": {"$eq": note_created}},
                 {"Title": note.title},
+                {"IsTrash": False},  # ignore notes in trash
+                {"NotebookId": self._db_notebook['_id']},
+                # check date created to handle duplicated note titles properly
+                # dont use $eq to avoid rounding errors (+-1s)
+                {"CreatedTime": {"$gte": note_created - rounded, "$lte": note_created + rounded}},
             ]
         }
-        db_note = self.db.notes.find_one(cond)
-        if db_note is None:
-            cond = {"Title": note.title}
-            db_note = self.db.notes.find_one(cond)
-            if db_note is not None:
-                db_note_created = self._get_db_timestamp(db_note, 'CreatedTime')
-                delta_created = self._compare_timestamps(note_created, db_note_created)
-                if delta_created >= 0:
-                    # happens, e.g. '2019-08-21T13:36:55+00:00' vs '2019-08-21T13:36:56+00:00' - assume rounding issue
-                    logger.debug("found note with nearly equal CreatedTime: %s (%s)", note.title, delta_created)
-                else:
-                    logger.warning("found note with different CreatedTime: %s\ncreated in EN: %s\ncreated in db: %s", 
-                                   note.title, note_created.isoformat(), db_note_created.isoformat())
-                    db_note = None  # not same, so create new note
+        candidates = list(self.db.notes.find(cond))
+        if not candidates:
+            return None
+
+        if len(candidates) > 1:
+            # how to pick appropriate note by title if not unique?  # TODO verify
+            # raise ValueError("failed to lookup note")
+            # e.g. " Cathedral of St John The Baptist, Savannah Georgia"
+            logger.warning('failed to determine existing note for "%s" created=%s',
+                           note.title, note_created and note_created.isoformat() or '(not set)')
+            for db_note in candidates:
+                logger.info("candidate: %s %s", self._get_db_timestamp(db_note, 'CreatedTime'), db_note['Title'])
+            # to be fixed, but at time beeing dont let fail but pick best guess
+            db_note = candidates[0]
+
+        else:
+            db_note = candidates[0]
         return db_note
 
     def _compare_timestamps(self, first, second):
@@ -106,20 +134,20 @@ class UpdateNote:
         db_note = self._lookup_db_note(note)
         if db_note is not None and db_note["IsDeleted"]:  # TODO deleted in EN?
             db_note = self._purge_note(db_note)
+
         if db_note is not None:
             note_updated = self._get_note_timestamp(note.updated)
             if note_updated is None:
                 note_updated = self._get_note_timestamp(note.created)
-            force_update = False  # args.force_update
             db_note_updated = self._get_db_timestamp(db_note, 'UpdatedTime')
             if db_note_updated is None and note_updated is not None:
                 # handle differences .enex vs EN api for date updated
                 db_note_updated = self._get_db_timestamp(db_note, 'CreatedTime')
             delta_updated = self._compare_timestamps(note_updated, db_note_updated)
 
-            if delta_updated < 0 or force_update:
+            if delta_updated < 0 or self.force_update:
                 logger.warning("note updated: '%s'\nupdated in db: %s\nupdated in EN: %s",
-                               note.title, 
+                               note.title,
                                db_note_updated and db_note_updated.isoformat() or '(unknown)',
                                note_updated and note_updated.isoformat() or '(unknown)',
                                )
@@ -140,24 +168,19 @@ class UpdateNote:
             if timestamp.tzinfo is None:
                 # avoid TypeError: can't compare offset-naive and offset-aware datetimes
                 timestamp = pytz.utc.localize(timestamp)
-            if timestamp < pytz.utc.localize(DATE_INVALID_BEFORE):
-                # date not known / set
-                # have no dates < 1990 so assume all dates before are invalid
-                return None
         else:
             timestamp = datetime.utcfromtimestamp(timestamp / 1000.0)
-            if timestamp < DATE_INVALID_BEFORE:
-                # 1.1.1970 (around) means date not known / set
-                # have no dates < 1990 so assume all dates before are invalid
-                return None
-            timestamp = pytz.utc.localize(timestamp)  
+            timestamp = pytz.utc.localize(timestamp)
+        if timestamp.year <= DATE_INVALID_YEAR:
+            # date not known / set
+            return None
         return timestamp
 
     def _purge_note(self, db_note):
         self.db.note_content_histories.delete_one({"_id": db_note["_id"]})
         self.db.note_contents.delete_one({"_id": db_note["_id"]})
         self.db.notes.delete_one({"_id": db_note["_id"]})
-        #TODO delete note_images, too
+        # TODO delete note_images, too
         return None
 
     def _create_db_note(self, note):
@@ -165,31 +188,17 @@ class UpdateNote:
         Creates mongodb note from EN note
         """
         logger.info('create new note "%s" in %s', note.title, self.notebook_name)
-        notebook_db = self.db.notebooks.find_one({"Title": self.notebook_name})
 
         # in transaction?
         # with session.start_transaction():
-        if notebook_db is None:
-            usn = self._get_user_usn(self.user)
-            self.db.notebooks.insert_one({
-                "Title": self.notebook_name,
-                "UrlTitle": slugify(self.notebook_name),
-                "NumberNotes": 0,
-                "Seq": -1,
-                "UserId": self.user['_id'],
-                "IsDeleted": False,
-                "Usn": usn,
-            })
-            notebook_db = self.db.notebooks.find_one({"Title": self.notebook_name})
-
-        assert notebook_db is not None, "must have notebook to sync to"
+        assert self._db_notebook is not None, "must have notebook to sync to"
         noteId = bson.objectid.ObjectId()
         content = note.content
         EN_NOTE_2 = '\<\!DOCTYPE\s+en-note\s+SYSTEM\s+"http://xml.evernote.com/pub/enml2.dtd"\s*\>'  # noqa: W605
         EN_NOTE_1 = '\<\!DOCTYPE\s+en-note\s+SYSTEM\s+"http://xml.evernote.com/pub/enml.dtd"\s*\>'  # noqa: W605
-        if re.search(EN_NOTE_2, content, re.MULTILINE+re.DOTALL) is None:
+        if re.search(EN_NOTE_2, content, re.MULTILINE + re.DOTALL) is None:
             # note created 2019-10 using enml.dtd
-            if re.search(EN_NOTE_1, content, re.MULTILINE+re.DOTALL) is None:
+            if re.search(EN_NOTE_1, content, re.MULTILINE + re.DOTALL) is None:
                 raise ValueError("content format unsupported: %s" % content[:180])
 
         # Save images
@@ -203,15 +212,18 @@ class UpdateNote:
 
         is_markdown = False
         usn = self._get_user_usn(self.user)
+        updated_time = self._get_note_timestamp(note.updated)
+        if not updated_time:
+            updated_time = None  # use .created?
         self.db.notes.insert_one({
             "_id": noteId,  # "NoteId"
             "Title": note.title,
             "Desc": "",  # note.Desc,
-            "NotebookId": notebook_db['_id'],
+            "NotebookId": self._db_notebook['_id'],
             # "PublicTime":"2014-09-04T07:42:24.070Z",
             # "RecommendTime":"2014-09-04T07:42:24.070Z",
             "CreatedTime": self._get_note_timestamp(note.created),
-            "UpdatedTime": self._get_note_timestamp(note.updated),
+            "UpdatedTime": updated_time,
             "UpdatedUserId": self.user['_id'],
             "SyncedTime": datetime.utcnow().replace(tzinfo=pytz.utc),
             "UrlTitle": slugify(note.title),
@@ -227,7 +239,7 @@ class UpdateNote:
         db_note = self.db.notes.find_one({'_id': noteId})
         assert db_note
 
-        self._update_note_count(notebook_db)
+        self.update_note_count()
         self.db.note_contents.insert_one({
             "_id": noteId,  # "NoteId"
             "UserId": self.user['_id'],
@@ -240,20 +252,15 @@ class UpdateNote:
 
         return db_note
 
-
     def update_note_count(self):
-        notebook_db = self.db.notebooks.find_one({"Title": self.notebook_name})
-        if notebook_db:
-            self._update_note_count(notebook_db)
-
-
-    def _update_note_count(self, notebook):
-        """ update notes count for given notebook """
-        note_count = self.db.notes.count_documents({'NotebookId': notebook['_id']})
+        """ update notes count for current notebook """
+        note_count = self.db.notes.count_documents({'NotebookId': self._db_notebook['_id']})
         logger.debug("update notebook note count to %s", note_count)
-        self.db.notebook.update_one(
-            {"_id": notebook['_id']},
-            {"$set": {"NumberNotes": note_count}}
+        self._db_notebook["Seq"] += 1
+        seq_no = self._db_notebook["Seq"]
+        self.db.notebooks.update_one(
+            {"_id": self._db_notebook['_id']},
+            {"$set": {"NumberNotes": note_count, "Seq": seq_no}}
         )
 
     def get_images(self, content):
@@ -293,7 +300,8 @@ class UpdateNote:
             next_elmt = img_tag.next_sibling
             if next_elmt and next_elmt.name == 'en-media':
                 # drop img tag preceeding en-media elmt
-                assert img_tag.attrs.keys() == [u'src', ], "extra attribs in img tag"
+                if img_tag.attrs.keys() != [u'src', ]:
+                    logger.debug("extra attribs in img tag: %s", img_tag.attrs.keys())  # width, height
                 img_tag.extract()
             else:
                 # logger.warning("missing en-media after img tag?")
@@ -308,6 +316,9 @@ class UpdateNote:
                 if imageType == "image":
                     newTag = soup.new_tag("img")
                     # new_path = img_map[en_media['hash']]['Path']
+                    if en_media['hash'] not in img_map:
+                        logger.warning("failed to fetch image from img_map")
+                        continue
                     image_id = img_map[en_media['hash']]['ImageId']
                     new_path = '/api/file/getImage?fileId=%s' % image_id
                     newTag['src'] = new_path
@@ -413,7 +424,7 @@ class UpdateNote:
         Updates mongodb note from EN note
         """
         content = note.content
-        EN_NOTE_2 = '\<\!DOCTYPE\s+en-note\s+SYSTEM\s+"http://xml.evernote.com/pub/enml2.dtd"\>'
+        EN_NOTE_2 = '\<\!DOCTYPE\s+en-note\s+SYSTEM\s+"http://xml.evernote.com/pub/enml2.dtd"\>'  # noqa: W605
         assert re.search(EN_NOTE_2, content) is not None, "content format unsupported: %s" % content[:180]
         noteId = db_note["_id"]
         db_note_created = self._get_db_timestamp(db_note, 'CreatedTime')
@@ -421,7 +432,7 @@ class UpdateNote:
         delta = self._compare_timestamps(note_created, db_note_created)
         if delta < 0:
             # must be invariant, otherwise followup later update will fail to lookup note as titles are not really unique
-            logger.error('failed to update note "%s", date created mismatch\nin db: %s\nin EN: %s', 
+            logger.error('failed to update note "%s", date created mismatch\nin db: %s\nin EN: %s',
                          note.title,
                          db_note_created and db_note_created.isoformat() or '(not set)',
                          note_created and note_created.isoformat() or '(not set)',
@@ -509,7 +520,7 @@ class UpdateNote:
                 img_path = file_obj['Path']
                 img_dir = img_path[:img_path.rfind('/') + 1]
                 img_name = img_path[len(img_dir):]
-                logger.info('existing image {}'.format(img_path))
+                logger.debug('existing image {}'.format(img_path))
 
             # resource.data.body is bytestream of image
             img_path = self.imghandler.upload_image(img_dir, img_name, resource.data.body)
@@ -547,10 +558,14 @@ class UpdateNote:
                 })
 
         for imageInfo in imageList:
-            binaryHash = binascii.unhexlify(imageInfo['hash'])
-            resource = note.get_resource_by_hash(binaryHash)
+            image_hash = imageInfo['hash']
+            resource = note.get_resource_by_hash(image_hash)
             if resource is None:
-                logger.warning("failed to match image by hash (%s)", imageInfo['hash'])
+                # happening ? (enex2mongo vs gsyncm differences??)
+                binary_hash = binascii.unhexlify(image_hash)
+                resource = note.get_resource_by_hash(binary_hash)
+            if resource is None:
+                logger.warning('failed to match image by hash (%s)', imageInfo['hash'])
             else:
                 handle_image(resource)
 

@@ -1,14 +1,16 @@
 #
 """
-extract notes and related data from Evernote .enex 
+extract notes and related data from Evernote .enex
 and import into mongodb
 
 note: should use note.guiid as base for lookup, but unfortunately do not have it in enex
 
 TODO:
-+ fix image handling, have too many "failed to match image by hash"
++ analyze 'failed to match image by hash', e.g. for "ein Rufer in der Wueste" in bibel (and "failed to fetch image from img_map")
 + seen tag removal during repated sync, to be verified - normalization issues?
 + automatically add notebook name if not set as tag - for easier searching on MongoDB level
++ during initial import, see 'note updated' messages (what is unexpected)
++ data encoding: see note "fst_verknuepfungen  - EDBCore, mgmt script" in hrs
 
 """
 
@@ -49,9 +51,12 @@ def get_argparse():
 def update_notebook(enex_path, notebook_name):
     updater = UpdateNote(notebook_name)
     enex_parser = EnexParser(enex_path)
+    note_count = 0
     for note in enex_parser.parse():
         # add or update note in mongodb
         updater.update(note)
+        note_count += 1
+    logger.info("total %s notes for notebook %s", note_count, notebook_name)
 
 
 def main():
@@ -72,7 +77,9 @@ def main():
                 enex_path = os.path.join(enex_dir, enex_file)
                 update_notebook(enex_path, notebook_name)
         else:
-            notebook_name = args.notebook
+            notebook_name = os.path.splitext(os.path.basename(enex_path))[0]
+            if args.notebook and notebook_name != args.notebook:
+                raise ValueError("bad notebook name: %s != %s", args.notebook, notebook_name)
             update_notebook(enex_path, notebook_name)
         logger.info("enex2mongo succeeded")
 

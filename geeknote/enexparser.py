@@ -54,7 +54,7 @@ class EnNote:
         if note.xpath(date_field):
             date_value = note.xpath(date_field)[0].text
         else:
-            date_value = '19700101T000017Z'  #TODO if 'updated' then current date?
+            date_value = '19700101T000000Z'
         date_value = self._parse_date(date_value)
         if date_value.tzinfo is None:
             date_value = pytz.utc.localize(date_value)
@@ -106,7 +106,7 @@ class ENResource:
         if data_encoding != "base64":
             # rarely, but happending
             assert data_encoding is None, "unknown data encoding: %s" % data_encoding
-            # logger.error("unsupported data encoding: %s" % data_encoding)
+            # logger.error("unsupported data encoding: %s" % data_encoding) # note "fst_verknuepfungen  - EDBCore, mgmt script" in hrs
             return
         self.data = ENResourceData(data_node.text)
         self.hash = hashlib.md5(self.data.body).hexdigest()
@@ -117,7 +117,7 @@ class ENResource:
         <width>72</width><height>36</height>
         <recognition><![CDATA[<?xml version="1.0" encoding="UTF-8"?>
             <!DOCTYPE recoIndex PUBLIC "SYSTEM" "http://xml.evernote.com/pub/recoIndex.dtd">
-            <recoIndex docType="unknown" objType="image" objID="eb75ae62c7ea56c17751b81b41a4f6c2" engineVersion="7.0.24.1" 
+            <recoIndex docType="unknown" objType="image" objID="eb75ae62c7ea56c17751b81b41a4f6c2" engineVersion="7.0.24.1"
                 recoType="service" lang="de" objWidth="72" objHeight="36"><item x="1" y="0" w="71" h="15">
                 <t w="60">:divibib</t></item>
                 <item x="8" y="19" w="28" h="8"><t w="42">digitale</t><t w="34">digitate</t></item>
