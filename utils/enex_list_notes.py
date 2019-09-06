@@ -7,6 +7,7 @@ import sys
 import os
 import argparse
 from datetime import datetime
+import dateutil
 
 import warnings
 
@@ -21,7 +22,7 @@ warnings.filterwarnings("ignore", message="Unicode equal comparison failed to co
 class SortNote:
 
     def __init__(self, args):
-        self.args = args 
+        self.args = args
 
     def __call__(self, note):
         sort = self.args.sort
@@ -56,6 +57,7 @@ def get_note_updated(note):
         updated = note.created
     return updated
 
+
 def list_notes(enex_path, notebook_name, args):
     logger.info("%s:", notebook_name)
     enex_parser = EnexParser(enex_path)
@@ -81,7 +83,9 @@ def list_notes(enex_path, notebook_name, args):
 
     for info in notes:
         updated = info['updated'] or info['created']
-        updated = updated.strftime("%c")
+        updated = updated.strftime("%c")  # TODO fix timezone issues (on Windows e.g.)
+        # datetime.now(dateutil.tz.tzlocal()).tzname()
+        # datetime.utcnow().astimezone().tzinfo
         title = info['title']
         if len(title) > 60:
             title = title[:60] + '..'
