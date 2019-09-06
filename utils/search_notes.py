@@ -30,7 +30,7 @@ SEARCH_TERMS = (
     u'"Die Hüter der Rose"',  # expect 6 notes, 5 found
     u'"Hüter der Rose"',  # expect 11 notes, 7 found
     u"Hüter Rose",  # expect 15, found 125
-    u"Hüter+Rose",  # 125 found (EN: 'Hüter Rose' 15 found)
+    u"Hüter+Rose",  # expect 0, 125 found (cf 'Hüter Rose')
     u"Wikipedia",  # expect 774, found 999
     u"python",  # expect 1965, found 1438
     u"python",  # dito 1965, found 1438
