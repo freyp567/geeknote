@@ -41,16 +41,26 @@ class CleanMongoDB:
         logger.info('cleanup start')
 
     def run(self):
+        logger.info("removing %s note_contents ...", self.db.note_contents.count())
         self.db.note_contents.remove({})
+        logger.info("removing %s note_content_histories ...", self.db.note_content_histories.count())
         self.db.note_content_histories.remove({})
+        logger.info("removing %ss notes ...", self.db.notes.count())
         self.db.notes.remove({})
+        logger.info("removing %s share_notes ...", self.db.share_notes.count())
         self.db.share_notes.remove({})
+        logger.info("removing %s note_images ...", self.db.note_images.count())
         self.db.note_images.remove({})
+        logger.info("removing %s note_tags ...", self.db.note_tags.count())
         self.db.note_tags.remove({})
+        logger.info("removing %s files ...", self.db.files.count())
         self.db.files.remove({})
         if 0:
+            logger.info("removing %s tag_count objs ...", self.db.tag_count.count())
             self.db.tag_count.remove({})
+            logger.info("removing %s tags objs ...", self.db.tags.count())
             self.db.tags.remove({})
+            logger.info("removing %s sessions objs ...", self.db.sessions.count())
             self.db.sessions.remove({})
         logger.info('cleanup done')
 
