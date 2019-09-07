@@ -18,6 +18,7 @@ import logging
 import re
 from datetime import datetime
 import pytz
+import json
 import binascii
 
 from evernote.edam.limits.constants import EDAM_USER_NOTES_MAX
@@ -211,13 +212,24 @@ class GNSyncM:
         return gn.findNotes(keywords, EDAM_USER_NOTES_MAX, notebookGuid=self.notebook_guid).notes
 
 
+def datetime_parser(dct):
+    for k, v in dct.items():
+        # if isinstance(v, str) and datetime_format_regex.match(v):
+        if k == 'succeeded':
+            v = datetime.strptime(v, "%Y-%m-%d %H:%M:%S")       
+            v = pytz.utc.localize(v)
+            dct[k] = v
+    return dct
+
+
 def main():
     try:
         parser = argparse.ArgumentParser()
         parser.add_argument('--notebook', '-n', action='store', help='Notebook name for synchronize. Default is default notebook unless all is selected')
         parser.add_argument('--all', '-a', action='store_true', help='Synchronize all notebooks', default=False)
         parser.add_argument('--all-linked', action='store_true', help='Get all linked notebooks')
-        parser.add_argument('--date', action='store', help='only notes created or changed after this date', default=None)
+        parser.add_argument('--date', action='store', help='only notes created or updated after this date', default=None)
+        parser.add_argument('--incremental', action='store_true', help='only notes created or updated since last successful run')
         parser.add_argument('--no-sleep-on-ratelimit', action='store_true', help='dont sleep on being ratelimited')
 
         args = parser.parse_args()
@@ -228,10 +240,23 @@ def main():
         geeknote = GeekNote(sleepOnRateLimit=sleepOnRateLimit)
         logger.debug("using Evernote with consumerKey=%s", geeknote.consumerKey)
 
+        last_update_fn = "gsyncm_last.json"
         changed_after = None
         if args.date:
             changed_after = datetime.strptime(args.date, "%Y-%m-%d")
             changed_after = pytz.utc.localize(changed_after)
+            assert not args.incremental, "cannot combine --date and --incremental"
+        elif args.incremental:
+            if not os.path.isfile(last_update_fn):
+                logger.error("missing state of last gsyncm, created dummy; please update: %s", last_update_fn)
+                now = datetime.now().replace(microsecond=0)
+                last_update_info = {'succeeded': now}
+                json.dump(last_update_info, open(last_update_fn, 'w'), default=str)  #json_util.default)
+                sys.exit(1)
+
+            last_update_info = json.load(open(last_update_fn, 'r'), object_hook=datetime_parser)
+            changed_after = last_update_info['succeeded']
+            args.all = True  # --incremental implies --all
 
         if args.all:
             logger.info("Synching all notebooks ...")
@@ -247,6 +272,14 @@ def main():
             GNS = GNSyncM(notebook_name, sleep_on_ratelimit=sleepOnRateLimit)
             assert GNS.all_set, "troubles with GNSyncM initialization"
             GNS.sync(changed_after)
+
+        if args.incremental:
+            assert os.path.isfile(last_update_fn)
+            now = datetime.now().replace(microsecond=0)
+            last_update_info = {
+                'succeeded': now
+            }
+            json.dump(last_update_info, open(last_update_fn, 'w'), default=str, indent=4)
 
     except (KeyboardInterrupt, SystemExit, tools.ExitException):
         # import traceback; traceback.print_exc()
