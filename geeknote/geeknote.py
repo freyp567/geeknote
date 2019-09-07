@@ -8,7 +8,8 @@ import os
 import mimetypes
 import hashlib
 import re
-
+import functools
+from datetime import datetime, timedelta
 import thrift.protocol.TBinaryProtocol as TBinaryProtocol
 import thrift.transport.THttpClient as THttpClient
 
@@ -37,6 +38,49 @@ def GeekNoneDBConnectOnly(func):
         GeekNote.skipInitConnection = True
         return func(*args, **kwargs)
     return wrapper
+
+
+def cache(func):
+    """Keep a cache of previous function calls"""
+    @functools.wraps(func)
+    def wrapper_cache(*args, **kwargs):
+        cache_key = tuple(list(args)[1:] + list(kwargs.items()))  # note: ignore arg[0], self
+        if cache_key not in wrapper_cache.cache:
+            wrapper_cache.cache[cache_key] = func(*args, **kwargs)
+        return wrapper_cache.cache[cache_key]
+    wrapper_cache.cache = dict()
+    return wrapper_cache
+    
+
+def call_count(func):
+    func_name = func.func_name
+    @functools.wraps(func)
+    def wrapper_count_calls(*args, **kwargs):
+        wrapper_count_calls.num_calls += 1
+        if 1:
+            print("Call %s of %s" % (wrapper_count_calls.num_calls, repr(func_name)))
+        return func(*args, **kwargs)
+    wrapper_count_calls.num_calls = 0
+    return wrapper_count_calls
+
+
+class call_count_ex:  # future, to replace call_count
+    """ decorator to count number of calls - to measure cause for rateLimits """
+
+    def __init__(self, func):  # TODO name=''
+        functools.update_wrapper(self, func)
+        self.func = func
+        #if not getattr(self, 'num_calls'):
+        #    self.num_calls = {}
+        #self.name = name
+        #self.num_calls[name] = 0  # TODO
+        self.num_calls = 0
+
+    def __call__(self, *args, **kwargs):
+        self.num_calls += 1
+        result = self.func(*args, **kwargs)
+        # TypeError: wrapper() takes at least 1 argument (0 given)  #xxx TODO to be fixed
+        return result
 
 
 def make_resource(filename):
@@ -83,6 +127,8 @@ class GeekNote(object):
     sharedAuthToken = None
     sharedNoteStore = None
 
+    tagCache = None  # static / class variable
+
     def __init__(self, skipInitConnection=False, sleepOnRateLimit=False):
         if skipInitConnection:
             self.skipInitConnection = True
@@ -128,8 +174,9 @@ class GeekNote(object):
                         # hammering the server on scripts
                         elif errorCode == 19:
                             if sleepOnRateLimit:
-                                print("\nRate Limit Hit: Sleeping %s seconds before continuing" %
-                                      str(e.rateLimitDuration))
+                                till = datetime.now() + timedelta(seconds=e.rateLimitDuration)
+                                print("\nRate Limit Hit: Sleeping %s seconds before continuing (till %s)" %
+                                      (str(e.rateLimitDuration), till.strftime("%H:%M")))
                                 time.sleep(e.rateLimitDuration)
                             else:
                                 print("\nRate Limit Hit: Please wait %s seconds before continuing" %
@@ -237,6 +284,7 @@ class GeekNote(object):
         return self.getStorage().removeUser()
 
     @EdamException
+    @call_count
     def getNote(self, guid, withContent=False, withResourcesData=False,
                 withResourcesRecognition=False, withResourcesAlternateData=False):
         """ GET A COMPLETE NOTE OBJECT """
@@ -246,6 +294,7 @@ class GeekNote(object):
                                            withResourcesAlternateData)
 
     @EdamException
+    @call_count
     def findNotes(self, keywords, count, createOrder=False, offset=0, deletedOnly=False, notebookGuid=None):
         """ WORK WITH NOTES """
         noteFilter = NoteStore.NoteFilter(order=Types.NoteSortOrder.RELEVANCE)
@@ -293,6 +342,7 @@ class GeekNote(object):
         return result
 
     @EdamException
+    @call_count
     def loadNoteContent(self, note):
         """ modify Note object """
         if not isinstance(note, object):
@@ -303,8 +353,42 @@ class GeekNote(object):
         self.loadNoteTags(note)
 
     @EdamException
+    @call_count
+    def listTagsByNotebook(self, notebookGuid):
+        return self.getNoteStore().listTagsByNotebook(self.authToken, notebookGuid)
+
+    @EdamException
+    @call_count
+    def listTags(self):
+        return self.getNoteStore().listTags(self.authToken)
+
+    # TODO @cache - then drop tagCache
+    def _lookup_tag(self, tag_guid):
+        if GeekNote.tagCache is None:
+            GeekNote.tagCache = self.listTags()
+
+        # lookup from cache to avoid excessive calls to API
+        tag = [tag for tag in GeekNote.tagCache if tag.guid == tag_guid]
+        if not tag:
+            # fallback in case tag is not found in cache
+            tag = self.getNoteStore().getTag(self.authToken, tag_guid)
+            # add to cache?
+        else:
+            assert len(tag) == 1
+            tag = tag[0]
+        return tag
+
+    @cache
+    def _lookup_notebook(self, notebook_guid):
+        """ lookup from cache to reduce number of API calls (to prevent rateLimit troubles) """
+        notebook = self.getNoteStore().getNotebook(self.authToken, notebook_guid)
+        return notebook
+        
+    @EdamException
     def loadNoteTags(self, note):
-        """ modify Note object, fetch tags """
+        """ modify Note object, fetch tags
+        note: _lookup_tag/_lookup_notebook are caching to reduce number of EDAM api cal.s 
+        """
         if not isinstance(note, object):
             raise Exception("Note content must be an "
                             "instance of Note, '%s' given." % type(note))
@@ -313,15 +397,18 @@ class GeekNote(object):
         if note.tagGuids and not getattr(note, 'tagNames', None):
             note.tagNames = []
             for guid in note.tagGuids:
-                tag = self.getNoteStore().getTag(self.authToken, guid)
+                # tag = self.getNoteStore().getTag(self.authToken, guid)  #
+                tag = self._lookup_tag(guid)
                 note.tagNames.append(tag.name)
         else:
             # note without tags
             note.tagNames = []
 
-        note.notebookName = self.getNoteStore().getNotebook(self.authToken, note.notebookGuid).name  # TODO lazy load
+        notebook = self._lookup_notebook(note.notebookGuid)
+        note.notebookName = notebook.name
 
     @EdamException
+    @call_count
     def loadLinkedNoteContent(self, note):
         if not isinstance(note, object):
             raise Exception("Note content must be an "
@@ -332,6 +419,7 @@ class GeekNote(object):
         pass 
 
     @EdamException
+    @call_count
     def createNote(self, title, content, tags=None, created=None, notebook=None, resources=None, reminder=None, url=None):
         note = Types.Note()
         note.title = title
@@ -389,6 +477,7 @@ class GeekNote(object):
         return self.getNoteStore().createNote(self.authToken, note)
 
     @EdamException
+    @call_count
     def updateNote(self, guid, title=None, content=None,
                    tags=None, created=None, notebook=None,
                    resources=None, reminder=None, url=None, shared=False):
@@ -467,6 +556,7 @@ class GeekNote(object):
         return True
 
     @EdamException
+    @call_count
     def removeNote(self, guid):
         logging.debug("Delete note with guid: %s", guid)
 
@@ -474,15 +564,18 @@ class GeekNote(object):
         return True
 
     @EdamException
+    @call_count
     def findNotebooks(self):
         """ WORK WITH NOTEBOOKS """
         return self.getNoteStore().listNotebooks(self.authToken)
 
     @EdamException
+    @call_count
     def findLinkedNotebooks(self):
         return self.getNoteStore().listLinkedNotebooks(self.authToken)
 
     @EdamException
+    @call_count
     def createNotebook(self, name, stack=None):
         notebook = Types.Notebook()
         notebook.name = name
@@ -495,6 +588,7 @@ class GeekNote(object):
         return result
 
     @EdamException
+    @call_count
     def updateNotebook(self, guid, name):
         notebook = Types.Notebook()
         notebook.name = name
@@ -506,6 +600,7 @@ class GeekNote(object):
         return True
 
     @EdamException
+    @call_count
     def removeNotebook(self, guid):
         logging.debug("Delete notebook : %s", guid)
 
@@ -513,10 +608,12 @@ class GeekNote(object):
         return True
 
     @EdamException
+    @call_count
     def findTags(self):
         return self.getNoteStore().listTags(self.authToken)
 
     @EdamException
+    @call_count
     def createTag(self, name):
         tag = Types.Tag()
         tag.name = name
@@ -527,6 +624,7 @@ class GeekNote(object):
         return result
 
     @EdamException
+    @call_count
     def updateTag(self, guid, name):
         tag = Types.Tag()
         tag.name = name
@@ -538,6 +636,7 @@ class GeekNote(object):
         return True
 
     @EdamException
+    @call_count
     def removeTag(self, guid):
         logging.debug("Delete tag : %s", guid)
 
@@ -545,6 +644,7 @@ class GeekNote(object):
         return True
 
     @EdamException
+    @call_count
     def saveMedia(self, guid, mediaHash, filename):
         logging.debug("saveMedia: guid:{}, mediaHash:{}, filename:{}".format(guid, mediaHash, filename))
 
@@ -553,6 +653,7 @@ class GeekNote(object):
         return True
 
     @EdamException
+    @call_count
     def handleMedia(self, guid, mediaHash, handler):
         logging.debug("handleMedia: guid:{}, mediaHash:{}".format(guid, mediaHash))
 

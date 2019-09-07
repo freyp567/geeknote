@@ -1,11 +1,14 @@
 #!/usr/bin/env python2 # noqa: E902
 # -*- coding: utf-8 -*-
 """ sync evernote notes to mongodb
-"""
-"""
-TODO: 
+
+ATTN still beta testing ahead
+known issues:
 + fix encoding / display when logging to console vs logfile (e.g. 'Der Spion des K├╢nigs - reading')
-+ more testing
++ tags get dropped under not yet determined circumstances
+  e.g. removed tag personalkb from "Automating EN backups?"
++ rateLimit issues for larger nubmer of notes (images?)
+  EDAMSystemException errorCode=19 rateLimitDuration
 """
 
 import os
@@ -15,6 +18,7 @@ import logging
 import re
 from datetime import datetime
 import pytz
+import binascii
 
 from evernote.edam.limits.constants import EDAM_USER_NOTES_MAX
 
@@ -24,16 +28,25 @@ from storage import Storage
 import tools
 from updatenote import UpdateNote
 
-# set default logger (write log to file)
-def_logpath = os.path.join(config.APP_DIR, 'gnsyncm.log')
-formatter = logging.Formatter('%(asctime)-15s : %(message)s')
-handler = logging.FileHandler(def_logpath)
-handler.setFormatter(formatter)
 
-logger = logging.getLogger("en2mongo")
-logger.setLevel(os.environ.get('LOGLEVEL') or logging.DEBUG)
-logger.addHandler(handler)
-logger.addHandler(logging.StreamHandler(sys.stderr))
+def setup_logging(logname):
+    # set default logger (write log to file)
+    # FORMAT = "%(asctime)-15s %(module)s %(funcName)s %(lineno)d : %(message)s"
+    FORMAT = "%(asctime)-15s : %(message)s"
+    formatter = logging.Formatter(FORMAT)
+    def_logpath = os.path.join(config.APP_DIR, 'gnsyncm.%s.log' % datetime.now().strftime("%Y-%m-%d"))
+    logging.basicConfig(format=FORMAT, filename=def_logpath)
+
+    logger = logging.getLogger("en2mongo")
+    logger.setLevel(os.environ.get('LOGLEVEL') or logging.DEBUG)
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    return logger
+
+
+logger = setup_logging("en2mongo")
+
 
 # http://en.wikipedia.org/wiki/Unicode_control_characters
 CONTROL_CHARS_RE = re.compile(u'[\x00-\x08\x0e-\x1f\x7f-\x9f]')
@@ -57,33 +70,6 @@ def log(func):
             logger.error("action %s failed", func.__name__)
             raise
     return wrapper
-
-
-def reset_logpath(logpath):
-    """
-    Reset logpath to path from command line
-    """
-    global logger
-
-    if not logpath:
-        return
-
-    # remove temporary log file if it's empty
-    if os.path.isfile(def_logpath):
-        if os.path.getsize(def_logpath) == 0:
-            os.remove(def_logpath)
-
-    # save previous handlers
-    handlers = logger.handlers
-
-    # remove old handlers
-    for handler in handlers:
-        logger.removeHandler(handler)
-
-    # try to set new file handler
-    handler = logging.FileHandler(logpath)
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
 
 
 def all_notebooks(sleep_on_ratelimit=False):
@@ -112,9 +98,15 @@ class ENNoteObj:
         self.gn = GeekNote(sleepOnRateLimit=self.sleep_on_ratelimit)
         self.gn.loadNoteContent(self._note)
 
-    def get_resource_by_hash(self, hash):
+    def get_image_resource(self, imageInfo):
         guid = self._note.guid
-        resource = self.gn.handleMedia(guid, hash, lambda r: r)
+        binary_hash = binascii.unhexlify(imageInfo['hash'])
+        try:
+            resource = self.gn.handleMedia(guid, binary_hash, lambda r: r)
+        except Exception as err:
+            # EDAMNotFoundException - what else?
+            logger.error('failed to lookup image for %s  - %s', imageInfo, err)
+            return None
         return resource
 
     def __getattr__(self, name):

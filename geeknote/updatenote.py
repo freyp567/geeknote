@@ -27,8 +27,9 @@ DATE_EQUAL_DELTA = 2.0
 
 def log_title(value):
     if isinstance(value, str):
-        value = unicode(value)
-        # TODO fix encoding for console / logfile
+        value = unicode(value, 'latin-1', 'replace')
+        # value.encode('latin-1', 'charrefreplace')
+        # TODO fix encoding for console / logfile # UnicodeDecodError
     if len(value) > 40:
         return u'"%s"..' % value[:40]
     else:
@@ -80,6 +81,8 @@ class UpdateNote:
             })
             notebook_db = self.db.notebooks.find_one({"Title": self.notebook_name})
             assert notebook_db is not None
+        else:
+            pass
         self._db_notebook = notebook_db
 
     def _get_db_timestamp(self, db_note, field_name):
@@ -392,7 +395,7 @@ class UpdateNote:
 
         removed = tag_names_db.difference(tag_names_new)
         for tag_name in removed:
-            logger.warning("removed tag: %s from '%s'", tag_name, log_title(note.title))
+            logger.warning("removed tag %s from %s", tag_name, log_title(note.title))
             # handle tag removal?
 
         if added or removed:
@@ -584,15 +587,9 @@ class UpdateNote:
                 })
 
         for imageInfo in imageList:
-            image_hash = imageInfo['hash']
-            resource = note.get_resource_by_hash(image_hash)
+            resource = note.get_image_resource(imageInfo)
             if resource is None:
-                # happening ? (enex2mongo vs gsyncm differences??)
-                binary_hash = binascii.unhexlify(image_hash)
-                resource = note.get_resource_by_hash(binary_hash)
-            if resource is None:
-                logger.warning('failed to match image by hash (%s)', imageInfo['hash'])  
-                # unable to show note title here
+                logger.warning('failed to lookp image for %s', imageInfo)
             else:
                 handle_image(resource)
 
