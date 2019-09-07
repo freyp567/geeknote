@@ -949,13 +949,13 @@ class Notes(GeekNoteConnector):
         # note
         my_shared_notebook = None
         for nb in self.getEvernote().findLinkedNotebooks():
-            #case-insensitive
+            # case-insensitive
             if notebook.lower() in nb.shareName.lower():
                 my_shared_notebook = nb
                 break
 
         # can't find the notebook
-        if my_shared_notebook == None:
+        if my_shared_notebook is None:
             out.failureMessage("Error: could not find specified Linked Notebook")
             return tools.exitErr()
 
