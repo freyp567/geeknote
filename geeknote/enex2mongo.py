@@ -7,10 +7,10 @@ note: should use note.guiid as base for lookup, but unfortunately do not have it
 
 TODO:
 + analyze 'failed to match image by hash', e.g. for "ein Rufer in der Wueste" in bibel (and "failed to fetch image from img_map")
-+ seen tag removal during repated sync, to be verified - normalization issues?
-+ automatically add notebook name if not set as tag - for easier searching on MongoDB level
++ seen tag removal during repated sync, to be verified - normalization issues? see "removed tag:"
 + during initial import, see 'note updated' messages (what is unexpected)
-+ data encoding: see note "fst_verknuepfungen  - EDBCore, mgmt script" in hrs
++ data encoding mussing (rare cases): e.g. note "fst_verknuepfungen  - EDBCore, mgmt script" in hrs
++ fix encoding / display when logging to console vs logfile (e.g. 'Der Spion des K├╢nigs - reading')
 
 """
 
