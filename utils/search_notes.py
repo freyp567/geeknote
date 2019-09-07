@@ -76,6 +76,7 @@ def excel_float(value):
     value = str(value).replace('.', ',')
     return
 
+
 class SearchSpecBase:
 
     def __init__(self, db):
@@ -140,7 +141,7 @@ class SearchContentRegex2(SearchSpecBase):
         collection = self.get_collection()
         # index = pymongo.IndexModel([('Content', pymongo.TEXT), ])
         # collection.create_index(index, name='note_content', default_language='german')  # fails
-        index = [('Content', pymongo.TEXT)]  
+        index = [('Content', pymongo.TEXT)]
         collection.create_index(index, name='note_content', default_language='german')
 
     def get_collection(self):
@@ -165,7 +166,7 @@ class SearchContentFulltext(SearchSpecBase):
 
     def prepare(self):
         collection = self.get_collection()
-        index = [('Content', pymongo.TEXT)]  
+        index = [('Content', pymongo.TEXT)]
         collection.create_index(index, name='note_content', default_language='german')
         # TODO fix SyntaxError: Invalid Syntax
 
@@ -174,23 +175,23 @@ class SearchContentFulltext(SearchSpecBase):
 
     def build_query(self, search_term):
         if 0:  # ' ' in search_term:
-            # force phrase search 
+            # force phrase search
             search_term = '"%s"' % search_term
         # no longer implicitly forcing phrase search, must be explicit
 
-        query = {"$text": 
-        {
-            "$search": search_term,
-            # "$language": 
-            # "$caseSensitive":
-            # "$diacrticSensitive": 
-        }}
+        query = {"$text": {  # noqa: E262
+                        "$search": search_term,
+                        # "$language":
+                        # "$caseSensitive":
+                        # "$diacrticSensitive":
+                    }
+                }
         return query
 
 
 # TODO allow to select using arguments 'ContentRegex2', 'ContentFulltext', 'TitleContains'
 # SEARCH_SPEC = SearchTitleContains
-#SEARCH_SPEC = SearchContentRegex2  # ATTN does not work
+# SEARCH_SPEC = SearchContentRegex2  # ATTN does not work
 SEARCH_SPEC = SearchContentFulltext
 
 
@@ -231,7 +232,7 @@ class SearchNote:
                     # have note_contents document, need to lookup note (metadata)
                     note = self.db.notes.find_one({'_id': doc['_id']})
                     assert note is not None
-                notebook = self.db.notebooks.find_one({'_id': note['NotebookId'] })
+                notebook = self.db.notebooks.find_one({'_id': note['NotebookId']})
                 LOGGER.debug('+ "%s" in "%s"', encode_log(note["Title"]), notebook['Title'])
             duration2 = datetime.now() - start  # takes very long with regex finds
             LOGGER.info('retrieved %s notes dT=%.2f', result_count, duration2.total_seconds())
@@ -285,7 +286,7 @@ def main():
     if not os.path.isdir("search_notes"):
         os.mkdir('search_notes')
     result_path = 'search_notes\\%s.%s.csv' % (search_info, datetime.now().strftime('%Y-%m-%dT%H%M'))
-    open(result_path +'.txt', 'w').write('search result summary for %s\n%s\n' % (search_info, datetime.now().isoformat()))
+    open(result_path + '.txt', 'w').write('search result summary for %s\n%s\n' % (search_info, datetime.now().isoformat()))
     columns = ('term', 'count', 'dTfind', 'dTfetch')
     with open(result_path, 'w+b') as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=columns, encoding='utf-8-sig')
