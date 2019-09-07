@@ -2,6 +2,11 @@
 # -*- coding: utf-8 -*-
 """ sync evernote notes to mongodb
 """
+"""
+TODO: 
++ fix encoding / display when logging to console vs logfile (e.g. 'Der Spion des K├╢nigs - reading')
++ more testing
+"""
 
 import os
 import sys
@@ -237,11 +242,15 @@ def main():
             changed_after = pytz.utc.localize(changed_after)
 
         if args.all:
+            logger.info("Synching all notebooks ...")
+            notebook_count = 0
             for notebook in all_notebooks(sleep_on_ratelimit=sleepOnRateLimit):
                 logger.info("Syncing notebook %s (%s)", notebook.name, notebook.guid)
                 GNS = GNSyncM(notebook.name, sleep_on_ratelimit=sleepOnRateLimit)
                 assert GNS.all_set, "GNSyncM initialization incomplete"
                 GNS.sync(changed_after)
+                notebook_count += 1
+            logger.info("synced total %s notebooks", notebook_count)
         else:
             GNS = GNSyncM(notebook_name, sleep_on_ratelimit=sleepOnRateLimit)
             assert GNS.all_set, "troubles with GNSyncM initialization"

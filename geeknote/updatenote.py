@@ -13,6 +13,7 @@ import bson
 import uuid
 from datetime import datetime, timedelta
 import pytz
+import dateutil.tz
 from slugify import slugify
 from bs4 import BeautifulSoup
 
@@ -20,8 +21,26 @@ import logging
 logger = logging.getLogger("en2mongo.updatenote")
 
 DATE_INVALID_BEFORE = datetime(1990, 01, 01)
-DATE_INVALID_YEAR = 1970
+DATE_UNKNOWN_YEAR = 1970
 DATE_EQUAL_DELTA = 2.0
+
+
+def log_title(value):
+    if isinstance(value, str):
+        value = unicode(value)
+        # TODO fix encoding for console / logfile
+    if len(value) > 40:
+        return u'"%s"..' % value[:40]
+    else:
+        return u'"%s"' % value
+
+
+def log_date(value):
+    if not value:
+        return '(not set)'
+    # TODO if timezone aware, convert to local timezone
+    value2 = value.astimezone(dateutil.tz.tzlocal())
+    return value2.strftime("%Y-%m-%dT%H:%M")  # .isoformat() without timezone
 
 
 class UpdateNote:
@@ -97,10 +116,10 @@ class UpdateNote:
             # how to pick appropriate note by title if not unique?  # TODO verify
             # raise ValueError("failed to lookup note")
             # e.g. " Cathedral of St John The Baptist, Savannah Georgia"
-            logger.warning('failed to determine existing note for "%s" created=%s',
-                           note.title, note_created and note_created.isoformat() or '(not set)')
+            logger.warning('failed to determine existing note for %s created=%s',
+                           log_title(note.title), note_created and note_created.isoformat() or '(not set)')
             for db_note in candidates:
-                logger.info("candidate: %s %s", self._get_db_timestamp(db_note, 'CreatedTime'), db_note['Title'])
+                logger.info("candidate: %s %s", log_date(self._get_db_timestamp(db_note), 'CreatedTime'), log_title(db_note['Title']))
             # to be fixed, but at time beeing dont let fail but pick best guess
             db_note = candidates[0]
 
@@ -129,6 +148,12 @@ class UpdateNote:
         else:
             return -1
 
+    def _get_note_updated_or_created(self, note):
+        note_updated = self._get_note_timestamp(note.updated)
+        if note_updated is None:
+            note_updated = self._get_note_timestamp(note.created)
+        return note_updated
+
     def update(self, note):
         """ update note in mongodb from EN note if missing or updated """
         db_note = self._lookup_db_note(note)
@@ -136,9 +161,7 @@ class UpdateNote:
             db_note = self._purge_note(db_note)
 
         if db_note is not None:
-            note_updated = self._get_note_timestamp(note.updated)
-            if note_updated is None:
-                note_updated = self._get_note_timestamp(note.created)
+            note_updated = self._get_note_updated_or_created(note)
             db_note_updated = self._get_db_timestamp(db_note, 'UpdatedTime')
             if db_note_updated is None and note_updated is not None:
                 # handle differences .enex vs EN api for date updated
@@ -146,18 +169,19 @@ class UpdateNote:
             delta_updated = self._compare_timestamps(note_updated, db_note_updated)
 
             if delta_updated < 0 or self.force_update:
-                logger.warning("note updated: '%s'\nupdated in db: %s\nupdated in EN: %s",
-                               note.title,
-                               db_note_updated and db_note_updated.isoformat() or '(unknown)',
-                               note_updated and note_updated.isoformat() or '(unknown)',
-                               )
+                logger.info('note updated: "%s"\nupdated in db: %s\nupdated in EN: %s',
+                            log_title(note.title), log_date(db_note_updated), log_date(note_updated),
+                            )
                 note.load_content()
                 self._update_db_note(db_note, note)
             else:
-                logger.debug("note unchanged: '%s'", note.title)
+                # logger.debug("note unchanged: %s", log_title(note.title)) # blather
+                pass
 
         else:  # new note
             note.load_content()
+            note_created = self._get_note_timestamp(note.created)
+            logger.debug('new note: %s created=%s', log_title(note.title), log_date(note_created))
             db_note = self._create_db_note(note)
 
         self._update_tags(db_note, note)
@@ -171,7 +195,7 @@ class UpdateNote:
         else:
             timestamp = datetime.utcfromtimestamp(timestamp / 1000.0)
             timestamp = pytz.utc.localize(timestamp)
-        if timestamp.year <= DATE_INVALID_YEAR:
+        if timestamp.year <= DATE_UNKNOWN_YEAR:
             # date not known / set
             return None
         return timestamp
@@ -187,15 +211,14 @@ class UpdateNote:
         """
         Creates mongodb note from EN note
         """
-        logger.info('create new note "%s" in %s', note.title, self.notebook_name)
+        logger.info('create new note %s (%s)', log_title(note.title), self.notebook_name)
 
-        # in transaction?
-        # with session.start_transaction():
         assert self._db_notebook is not None, "must have notebook to sync to"
         noteId = bson.objectid.ObjectId()
         content = note.content
-        EN_NOTE_2 = '\<\!DOCTYPE\s+en-note\s+SYSTEM\s+"http://xml.evernote.com/pub/enml2.dtd"\s*\>'  # noqa: W605
-        EN_NOTE_1 = '\<\!DOCTYPE\s+en-note\s+SYSTEM\s+"http://xml.evernote.com/pub/enml.dtd"\s*\>'  # noqa: W605
+        EN_NOTE = '\<\!DOCTYPE\s+en-note\s+SYSTEM\s+"http://xml.evernote.com/pub/%s"\s*\>'  # noqa: W605
+        EN_NOTE_1 = EN_NOTE % 'enml.dtd'
+        EN_NOTE_2 = EN_NOTE % 'enml2.dtd'
         if re.search(EN_NOTE_2, content, re.MULTILINE + re.DOTALL) is None:
             # note created 2019-10 using enml.dtd
             if re.search(EN_NOTE_1, content, re.MULTILINE + re.DOTALL) is None:
@@ -255,7 +278,7 @@ class UpdateNote:
     def update_note_count(self):
         """ update notes count for current notebook """
         note_count = self.db.notes.count_documents({'NotebookId': self._db_notebook['_id']})
-        logger.debug("update notebook note count to %s", note_count)
+        logger.debug("update notebook note count for %s to %s", self.notebook_name, note_count)
         self._db_notebook["Seq"] += 1
         seq_no = self._db_notebook["Seq"]
         self.db.notebooks.update_one(
@@ -346,6 +369,9 @@ class UpdateNote:
 
         tag_names_new = set(note.tagNames)
         tag_names_new.add("")
+        if self.notebook_name not in tag_names_new:
+            # automatically add notebook_name as tag name - for easier searching
+            tag_names_new.add(self.notebook_name)
         tag_names_db = set(db_note.get('Tags', []))
         tag_names_db.add("")
         added = tag_names_new.difference(tag_names_db)
@@ -366,12 +392,12 @@ class UpdateNote:
 
         removed = tag_names_db.difference(tag_names_new)
         for tag_name in removed:
-            logger.warning("removed tag: %s from '%s'", tag_name, note.title)
+            logger.warning("removed tag: %s from '%s'", tag_name, log_title(note.title))
             # handle tag removal?
 
         if added or removed:
             # update tag list of note
-            logger.debug("update tags for note: %s", tag_names_new)
+            logger.debug('update tags for note: %s (%s)', tag_names_new, log_title(note.title))
             self.db.notes.update_one(
                 {'_id': db_note['_id']},
                 {"$set": {"Tags": list(tag_names_new)}}
@@ -565,7 +591,8 @@ class UpdateNote:
                 binary_hash = binascii.unhexlify(image_hash)
                 resource = note.get_resource_by_hash(binary_hash)
             if resource is None:
-                logger.warning('failed to match image by hash (%s)', imageInfo['hash'])
+                logger.warning('failed to match image by hash (%s)', imageInfo['hash'])  
+                # unable to show note title here
             else:
                 handle_image(resource)
 
