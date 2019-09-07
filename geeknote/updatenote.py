@@ -589,7 +589,7 @@ class UpdateNote:
         for imageInfo in imageList:
             resource = note.get_image_resource(imageInfo)
             if resource is None:
-                logger.warning('failed to lookp image for %s', imageInfo)
+                logger.warning('failed to lookup image for %s: %s', log_title(note.title), imageInfo)
             else:
                 handle_image(resource)
 

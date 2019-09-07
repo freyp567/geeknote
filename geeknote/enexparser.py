@@ -60,9 +60,10 @@ class EnNote:
             date_value = pytz.utc.localize(date_value)
         return date_value
 
-    def get_resource_by_hash(self, hash):
+    def get_image_resource(self, imageInfo):
+        image_hash = imageInfo['hash']
         for resource in self.resources:
-            if resource.hash == hash:
+            if resource.hash == image_hash:
                 return resource
         return None
 

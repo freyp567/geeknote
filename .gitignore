@@ -52,3 +52,4 @@ debug/
 config/database.db
 config/error.log
 search_notes/
+gsyncm_last.json
