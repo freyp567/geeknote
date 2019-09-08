@@ -4,11 +4,10 @@
 
 ATTN still beta testing ahead
 known issues:
-+ fix encoding / display when logging to console vs logfile (e.g. 'Der Spion des K├╢nigs - reading')
-+ tags get dropped under not yet determined circumstances
++ fix encoding / display when logging to console vs logfile (e.g. 'Der Spion des K├╢nigs - reading')  - python3 migration?
++ tags seem to get dropped under not yet determined circumstances
   e.g. removed tag personalkb from "Automating EN backups?"
-+ rateLimit issues for larger nubmer of notes (images?)
-  EDAMSystemException errorCode=19 rateLimitDuration
+
 """
 
 import os
