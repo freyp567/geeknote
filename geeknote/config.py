@@ -98,7 +98,7 @@ NOTE_WEBCLIENT_URL = NOTE_WEBCLIENT_URL.replace('%service%', USER_BASE_URL)
 NOTE_LINK = NOTE_LINK.replace('%service%', USER_BASE_URL)
 
 
-# monbodb
+# mongodb
 DB_URI = os.environ.get('DB_URI')
 DB_NAME = os.environ.get('DB_NAME')
 DB_USERNAME = os.environ.get('DB_USERNAME')
@@ -108,3 +108,5 @@ FTP_HOST = os.environ.get('FTP_HOST')
 FTP_USER = os.environ.get('FTP_USER')
 FTP_PWD = os.environ.get('FTP_PWD')
 
+# gsyncm
+LAST_UPDATE_FN = "gsyncm_last.json"

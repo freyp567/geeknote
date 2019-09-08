@@ -57,7 +57,7 @@ def call_count(func):
     @functools.wraps(func)
     def wrapper_count_calls(*args, **kwargs):
         wrapper_count_calls.num_calls += 1
-        if 1:
+        if 0:  # set 1 to troubleshoot rate limit issues
             print("Call %s of %s" % (wrapper_count_calls.num_calls, repr(func_name)))
         return func(*args, **kwargs)
     wrapper_count_calls.num_calls = 0

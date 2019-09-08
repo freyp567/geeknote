@@ -1,4 +1,5 @@
-#
+#!/usr/bin/env python2 # noqa: E902
+# -*- coding: utf-8 -*-
 """
 extract notes and related data from Evernote .enex
 and import into mongodb
@@ -19,25 +20,36 @@ import os
 import argparse
 from enexparser import EnexParser
 from updatenote import UpdateNote
+from datetime import datetime
+import json
 import logging
 import config
 
 
-def setup_logger():
+def setup_logger(logname):
+    LOG_FORMAT = '%(asctime)-15s %(levelname)s  %(message)s'
+    LOG_FORMAT_2 = '%(asctime)-15s  %(message)s'
+    LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
+    logpath = os.path.join(config.APP_DIR, 'enex2mongo.log')  # config.ERROR_LOG
+    logpath = os.path.abspath(logpath)
+    print("setup logging, logpath='%s'\n" % logpath)
+    logging.basicConfig(format=LOG_FORMAT, filename=logpath)  # datefmt=
+
     # set default logger (write log to file)
-    def_logpath = os.path.join(config.APP_DIR, 'enex2mongo.log')
-    formatter = logging.Formatter('%(asctime)-15s : %(message)s')
-    handler = logging.FileHandler(def_logpath)
+    formatter = logging.Formatter(LOG_FORMAT_2, LOG_DATEFMT)
+    handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(formatter)
 
-    logger = logging.getLogger("en2mongo")
-    logger.setLevel(os.environ.get('LOGLEVEL') or logging.INFO)
+    logger = logging.getLogger()  # root logger
+    logger.setLevel(logging.INFO)
     logger.addHandler(handler)
-    logger.addHandler(logging.StreamHandler(sys.stderr))
+
+    logger = logging.getLogger(logname)
+    logger.setLevel(os.environ.get('LOGLEVEL') or logging.INFO)
     return logger
 
 
-logger = setup_logger()
+logger = setup_logger("en2mongo")
 
 
 def get_argparse():
@@ -52,11 +64,15 @@ def update_notebook(enex_path, notebook_name):
     updater = UpdateNote(notebook_name)
     enex_parser = EnexParser(enex_path)
     note_count = 0
+    last_update = datetime(1970, 01, 01)
     for note in enex_parser.parse():
         # add or update note in mongodb
         updater.update(note)
         note_count += 1
-    logger.info("total %s notes for notebook %s", note_count, notebook_name)
+        if note.updated > last_update:
+            last_update = note.updated
+    logger.info("total %s notes for notebook %s last_update=%s", note_count, notebook_name, last_update)
+    return last_update
 
 
 def main():
@@ -64,6 +80,7 @@ def main():
     args = arg_parser.parse_args()
     logger.info("run enex2mongo with args: %s", args)
 
+    last_update = datetime(1970, 01, 01)
     notebook_name = '(loading)'
     try:
         enex_path = args.input
@@ -75,7 +92,24 @@ def main():
                 # assume .enex file name matches notebook name (MUST, dont know how to map otherwise)
                 notebook_name = os.path.splitext(os.path.basename(enex_file))[0]
                 enex_path = os.path.join(enex_dir, enex_file)
-                update_notebook(enex_path, notebook_name)
+                last_update_nb = update_notebook(enex_path, notebook_name)
+                if last_update:
+                    last_update = max(last_update, last_update_nb)
+                else:
+                    last_update = last_update_nb
+
+            if last_update.year > 1970:
+                last_update_info = {
+                    'succeeded': last_update
+                }
+                last_update_fn = config.LAST_UPDATE_FN
+                # if os.path.isfile(last_update_fn):
+                #    last_update_info = json.load(open(last_update_fn, 'r'), object_hook=fix_last_update)
+                #    changed_after = last_update_info['succeeded']
+
+                json.dump(last_update_info, open(last_update_fn, 'w'), default=str, indent=4)
+                logger.info("set last_update=%s in %s", last_update, last_update_fn)
+
         else:
             notebook_name = os.path.splitext(os.path.basename(enex_path))[0]
             if args.notebook and notebook_name != args.notebook:

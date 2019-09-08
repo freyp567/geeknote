@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 update note in mongodb
 """
@@ -26,10 +27,13 @@ DATE_EQUAL_DELTA = 2.0
 
 
 def log_title(value):
-    if isinstance(value, str):
+    if not isinstance(value, unicode):
         value = unicode(value, 'latin-1', 'replace')
-        # value.encode('latin-1', 'charrefreplace')
+        # value = value.encode('latin-1', 'charrefreplace')
         # TODO fix encoding for console / logfile # UnicodeDecodError
+    else:
+        value = value
+        # value = value.encode('latin-1', 'charrefreplace')  # fails
     if len(value) > 40:
         return u'"%s"..' % value[:40]
     else:
@@ -39,6 +43,8 @@ def log_title(value):
 def log_date(value):
     if not value:
         return '(not set)'
+    if not isinstance(value, datetime):
+        return repr(value)
     # TODO if timezone aware, convert to local timezone
     value2 = value.astimezone(dateutil.tz.tzlocal())
     return value2.strftime("%Y-%m-%dT%H:%M")  # .isoformat() without timezone
@@ -159,6 +165,7 @@ class UpdateNote:
 
     def update(self, note):
         """ update note in mongodb from EN note if missing or updated """
+        updated = False
         db_note = self._lookup_db_note(note)
         if db_note is not None and db_note["IsDeleted"]:  # TODO deleted in EN?
             db_note = self._purge_note(db_note)
@@ -172,22 +179,24 @@ class UpdateNote:
             delta_updated = self._compare_timestamps(note_updated, db_note_updated)
 
             if delta_updated < 0 or self.force_update:
-                logger.info('note updated: "%s"\nupdated in db: %s\nupdated in EN: %s',
-                            log_title(note.title), log_date(db_note_updated), log_date(note_updated),
+                logger.debug('note changed: "%s"\nupdated in db: %s\nupdated in EN: %s',
+                             log_title(note.title), log_date(db_note_updated), log_date(note_updated),
                             )
                 note.load_content()
-                self._update_db_note(db_note, note)
+                updated = self._update_db_note(db_note, note)
             else:
                 # logger.debug("note unchanged: %s", log_title(note.title)) # blather
-                pass
+                updated = False
 
         else:  # new note
             note.load_content()
             note_created = self._get_note_timestamp(note.created)
             logger.debug('new note: %s created=%s', log_title(note.title), log_date(note_created))
             db_note = self._create_db_note(note)
+            updated = True
 
         self._update_tags(db_note, note)
+        return updated
 
     def _get_note_timestamp(self, timestamp):
         """ convert timestamp to mongodb timestamp """
@@ -214,7 +223,10 @@ class UpdateNote:
         """
         Creates mongodb note from EN note
         """
-        logger.info('create new note %s (%s)', log_title(note.title), self.notebook_name)
+        logger.info('create new note %s (%s) %s', 
+                    log_title(note.title), 
+                    self.notebook_name, 
+                    log_date(self._get_note_timestamp(note.created)))
 
         assert self._db_notebook is not None, "must have notebook to sync to"
         noteId = bson.objectid.ObjectId()
@@ -462,11 +474,13 @@ class UpdateNote:
         if delta < 0:
             # must be invariant, otherwise followup later update will fail to lookup note as titles are not really unique
             logger.error('failed to update note "%s", date created mismatch\nin db: %s\nin EN: %s',
-                         note.title,
-                         db_note_created and db_note_created.isoformat() or '(not set)',
-                         note_created and note_created.isoformat() or '(not set)',
-                         )
-            return
+                         note.title, log_date(db_note_created), log_date(note_created))
+            return False
+
+        logger.info('update note "%s" created=%s updated=%s',
+                    note.title, 
+                    log_date(self._get_note_timestamp(note.created)), 
+                    log_date(self._get_note_timestamp(note.updated)))
 
         # Save images
         imageList = self.get_images(content)
@@ -528,7 +542,7 @@ class UpdateNote:
         )
 
         # note: note tags to be updated by caller
-        return
+        return True
 
     def _handle_images(self, noteId, note, imageList):
         img_map = {}
@@ -544,7 +558,7 @@ class UpdateNote:
                 img_dir = tools.get_random_filepath(str(self.user['_id']), new_guid)
                 img_name = '{}.{}'.format(new_guid, imageInfo['extension'])
                 img_path = '{}/{}'.format(img_dir, img_name)
-                logger.info('new image {}'.format(img_path))
+                # logger.info('new image {}'.format(img_path))  # log bloat
             else:
                 img_path = file_obj['Path']
                 img_dir = img_path[:img_path.rfind('/') + 1]

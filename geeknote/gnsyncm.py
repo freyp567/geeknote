@@ -13,10 +13,12 @@ known issues:
 
 import os
 import sys
+import io
+import codecs
 import argparse
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 import json
 import binascii
@@ -31,18 +33,36 @@ from updatenote import UpdateNote
 
 
 def setup_logging(logname):
-    # set default logger (write log to file)
+    # set default logger
     # FORMAT = "%(asctime)-15s %(module)s %(funcName)s %(lineno)d : %(message)s"
-    FORMAT = "%(asctime)-15s : %(message)s"
-    formatter = logging.Formatter(FORMAT)
-    def_logpath = os.path.join(config.APP_DIR, 'gnsyncm.%s.log' % datetime.now().strftime("%Y-%m-%d"))
-    logging.basicConfig(format=FORMAT, filename=def_logpath)
+    LOG_FORMAT = '%(asctime)-15s %(levelname)s  %(message)s'
+    LOG_FORMAT_2 = '%(asctime)-15s  %(message)s'
+    LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
+    # TODO add/use logging_gnsyncm.conf to/from app folder
+    logging._defaultFormatter = logging.Formatter(u"%(message)s")
+    logging.basicConfig(format=LOG_FORMAT_2)  # datefmt=
+    logpath = os.path.join(config.APP_DIR, 'gnsyncm.%s.log' % datetime.now().strftime("%Y-%m-%d"))
+    logpath = os.path.abspath(logpath)
+    print("setup logging, logpath='%s'\n" % logpath)
+    if not os.path.isfile(logpath):
+        io.open(logpath, 'w', encoding='utf-8-sig').write(u'\n')
 
-    logger = logging.getLogger("en2mongo")
-    logger.setLevel(os.environ.get('LOGLEVEL') or logging.DEBUG)
-    handler = logging.StreamHandler(sys.stderr)
+    # set default logger (write log to file)
+    formatter = logging.Formatter(LOG_FORMAT, LOG_DATEFMT)
+
+    logger = logging.getLogger()  # root logger
+    #log_fh = io.open(logpath, "a", encoding="utf-8-sig")
+    handler = logging.FileHandler(logpath)
     handler.setFormatter(formatter)
     logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+    logger = logging.getLogger(logname)
+    handler = logging.StreamHandler(sys.stderr)
+    logger.addHandler(handler)
+    logger.setLevel(os.environ.get('LOGLEVEL') or logging.INFO)
+    logger.info("setup gnsyncm")
+    logger.info(u"## äöüéδ\n")
     return logger
 
 
@@ -131,12 +151,11 @@ class GNSyncM:
         if not Storage().getUserToken():
             raise Exception("Auth error. There is not any oAuthToken.")
 
-        # TODO check mongodb connectivity - fail early
+        # establish mongodb connectivity
         self.updater = UpdateNote(notebook_name)
 
-        logger.info('Sync notebook=%s ...', notebook_name)
-
-        # set notebook
+        # set notebook to sync from
+        logger.debug('Sync notebook=%s ...', notebook_name)
         self.notebook_guid,\
             self.notebook_name = self._get_notebook(notebook_name)
 
@@ -182,10 +201,15 @@ class GNSyncM:
         """
         assert self.all_set, "cannot sync with partial initialization"
         notes = self._get_notes(changed_after)
-        logger.info("found %s notes to be synced", len(notes))
+        if not notes:
+            logger.info("no notes found to be synced in %s", self.notebook_name)
+            return 0
+
+        logger.info("found %s notes to be synced in notebook %s", len(notes), self.notebook_name)
+        synced = 0
         for note in notes:
             if changed_after is not None:
-                # to be handled by findNote, but for time beeing isnt
+                # double checked, as changed_after is used as constaint by _get_notes already
                 note_changed = self.updater._get_note_timestamp(note.updated or note.created)
                 if note_changed < changed_after:
                     logger.debug("ignore note '%s', last changed %s", note.title, changed_after)
@@ -193,26 +217,28 @@ class GNSyncM:
 
             # wrap note (NoteMetadata object) to provide get_resource_by_hash ...
             note_obj = ENNoteObj(note, self.sleep_on_ratelimit)
-            self.updater.update(note_obj)
+            if self.updater.update(note_obj):
+                synced += 1  # count number of notes effectively synced
 
         self.updater.update_note_count()
-        logger.info('Sync Complete')
+        logger.info('Sync Complete\n')
+        return synced
 
     def _get_notes(self, changed_after=None):
         """ Get notes from evernote notebook.
         """
-        keywords = ''
         gn = GeekNote(sleepOnRateLimit=self.sleep_on_ratelimit)
         if changed_after is not None:
-            # limit number of notes to check
-            # keywords = 'created:' +changed_after.strftime("%Y%m%dT%H%M%SZ")
-            # e.g. 'created:20070704T150000Z'  # does not work as expected (in EN sandbox)
-            keywords = 'created:' + changed_after.strftime("%Y%m%d")  # e.g. 'created:20070704T20190801'
-            logger.info("restrict notes using filter: %s", keywords)
+            # limit number of notes to check using constraint on date updated
+            # e.g. 'updated:20070704T150000Z'  # does not work as expected (in EN sandbox)
+            keywords = 'created:' + changed_after.strftime("%Y%m%dT%H%M%S")  # e.g. 'created:20070704T20190801'
+            # logger.debug("restrict notes using filter: %s", keywords)  # log bloat
+        else:
+            keywords = ''
         return gn.findNotes(keywords, EDAM_USER_NOTES_MAX, notebookGuid=self.notebook_guid).notes
 
 
-def datetime_parser(dct):
+def fix_last_update(dct):
     for k, v in dct.items():
         # if isinstance(v, str) and datetime_format_regex.match(v):
         if k == 'succeeded':
@@ -240,7 +266,7 @@ def main():
         geeknote = GeekNote(sleepOnRateLimit=sleepOnRateLimit)
         logger.debug("using Evernote with consumerKey=%s", geeknote.consumerKey)
 
-        last_update_fn = "gsyncm_last.json"
+        last_update_fn = config.LAST_UPDATE_FN
         changed_after = None
         if args.date:
             changed_after = datetime.strptime(args.date, "%Y-%m-%d")
@@ -254,24 +280,26 @@ def main():
                 json.dump(last_update_info, open(last_update_fn, 'w'), default=str)  #json_util.default)
                 sys.exit(1)
 
-            last_update_info = json.load(open(last_update_fn, 'r'), object_hook=datetime_parser)
+            last_update_info = json.load(open(last_update_fn, 'r'), object_hook=fix_last_update)
             changed_after = last_update_info['succeeded']
             args.all = True  # --incremental implies --all
 
         if args.all:
             logger.info("Synching all notebooks ...")
             notebook_count = 0
+            notes_synced = 0
             for notebook in all_notebooks(sleep_on_ratelimit=sleepOnRateLimit):
-                logger.info("Syncing notebook %s (%s)", notebook.name, notebook.guid)
+                logger.debug("Syncing notebook %s (%s)", notebook.name, notebook.guid)
                 GNS = GNSyncM(notebook.name, sleep_on_ratelimit=sleepOnRateLimit)
                 assert GNS.all_set, "GNSyncM initialization incomplete"
-                GNS.sync(changed_after)
+                notes_synced += GNS.sync(changed_after)
                 notebook_count += 1
-            logger.info("synced total %s notebooks", notebook_count)
+            logger.info("synced total %s notebooks, %s notes", notebook_count, notes_synced)
         else:
             GNS = GNSyncM(notebook_name, sleep_on_ratelimit=sleepOnRateLimit)
             assert GNS.all_set, "troubles with GNSyncM initialization"
-            GNS.sync(changed_after)
+            notes_synced = GNS.sync(changed_after)
+            logger.info("synced notebook %s, %s notes", notebook_name, notes_synced)
 
         if args.incremental:
             assert os.path.isfile(last_update_fn)
