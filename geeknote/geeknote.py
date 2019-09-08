@@ -64,25 +64,6 @@ def call_count(func):
     return wrapper_count_calls
 
 
-class call_count_ex:  # future, to replace call_count
-    """ decorator to count number of calls - to measure cause for rateLimits """
-
-    def __init__(self, func):  # TODO name=''
-        functools.update_wrapper(self, func)
-        self.func = func
-        #if not getattr(self, 'num_calls'):
-        #    self.num_calls = {}
-        #self.name = name
-        #self.num_calls[name] = 0  # TODO
-        self.num_calls = 0
-
-    def __call__(self, *args, **kwargs):
-        self.num_calls += 1
-        result = self.func(*args, **kwargs)
-        # TypeError: wrapper() takes at least 1 argument (0 given)  #xxx TODO to be fixed
-        return result
-
-
 def make_resource(filename):
     try:
         mtype = mimetypes.guess_type(filename)[0]
@@ -362,7 +343,6 @@ class GeekNote(object):
     def listTags(self):
         return self.getNoteStore().listTags(self.authToken)
 
-    # TODO @cache - then drop tagCache
     def _lookup_tag(self, tag_guid):
         if GeekNote.tagCache is None:
             GeekNote.tagCache = self.listTags()
