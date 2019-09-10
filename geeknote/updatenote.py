@@ -28,9 +28,7 @@ DATE_EQUAL_DELTA = 2.0
 
 def log_title(value):
     if not isinstance(value, unicode):
-        value = unicode(value, 'latin-1', 'replace')
-        # value = value.encode('latin-1', 'charrefreplace')
-        # TODO fix encoding for console / logfile # UnicodeDecodError
+        value = unicode(value, 'utf-8', 'replace')
     else:
         value = value
         # value = value.encode('latin-1', 'charrefreplace')  # fails
@@ -45,7 +43,7 @@ def log_date(value):
         return '(not set)'
     if not isinstance(value, datetime):
         return repr(value)
-    # TODO if timezone aware, convert to local timezone
+    # assume timezone aware, convert to local timezone
     value2 = value.astimezone(dateutil.tz.tzlocal())
     return value2.strftime("%Y-%m-%dT%H:%M")  # .isoformat() without timezone
 
@@ -122,13 +120,13 @@ class UpdateNote:
             return None
 
         if len(candidates) > 1:
-            # how to pick appropriate note by title if not unique?  # TODO verify
+            # how to pick appropriate note by title if not unique?  # to be verified (rare cases)
             # raise ValueError("failed to lookup note")
             # e.g. " Cathedral of St John The Baptist, Savannah Georgia"
-            logger.warning('failed to determine existing note for %s created=%s',
+            logger.warning(u'failed to determine existing note for %s created=%s',
                            log_title(note.title), note_created and note_created.isoformat() or '(not set)')
             for db_note in candidates:
-                logger.info("candidate: %s %s", log_date(self._get_db_timestamp(db_note), 'CreatedTime'), log_title(db_note['Title']))
+                logger.info(u"candidate: %s %s", log_date(self._get_db_timestamp(db_note), 'CreatedTime'), log_title(db_note['Title']))
             # to be fixed, but at time beeing dont let fail but pick best guess
             db_note = candidates[0]
 
@@ -167,7 +165,8 @@ class UpdateNote:
         """ update note in mongodb from EN note if missing or updated """
         updated = False
         db_note = self._lookup_db_note(note)
-        if db_note is not None and db_note["IsDeleted"]:  # TODO deleted in EN?
+        if db_note is not None and db_note["IsDeleted"]:  
+            # TODO deleted in EN?
             db_note = self._purge_note(db_note)
 
         if db_note is not None:
@@ -179,19 +178,19 @@ class UpdateNote:
             delta_updated = self._compare_timestamps(note_updated, db_note_updated)
 
             if delta_updated < 0 or self.force_update:
-                logger.debug('note changed: "%s"\nupdated in db: %s\nupdated in EN: %s',
+                logger.debug(u'note changed: "%s"\nupdated in db: %s\nupdated in EN: %s',
                              log_title(note.title), log_date(db_note_updated), log_date(note_updated),
                             )
                 note.load_content()
                 updated = self._update_db_note(db_note, note)
             else:
-                # logger.debug("note unchanged: %s", log_title(note.title)) # blather
+                # logger.debug(u"note unchanged: %s", log_title(note.title)) # blather
                 updated = False
 
         else:  # new note
             note.load_content()
             note_created = self._get_note_timestamp(note.created)
-            logger.debug('new note: %s created=%s', log_title(note.title), log_date(note_created))
+            logger.debug(u'new note: %s created=%s', log_title(note.title), log_date(note_created))
             db_note = self._create_db_note(note)
             updated = True
 
@@ -223,7 +222,7 @@ class UpdateNote:
         """
         Creates mongodb note from EN note
         """
-        logger.info('create new note %s (%s) %s', 
+        logger.info(u'create new note %s (%s) created=%s', 
                     log_title(note.title), 
                     self.notebook_name, 
                     log_date(self._get_note_timestamp(note.created)))
@@ -407,12 +406,12 @@ class UpdateNote:
 
         removed = tag_names_db.difference(tag_names_new)
         for tag_name in removed:
-            logger.warning("removed tag %s from %s", tag_name, log_title(note.title))
+            logger.warning(u"removed tag %s from %s", tag_name, log_title(note.title))
             # handle tag removal?
 
         if added or removed:
             # update tag list of note
-            logger.debug('update tags for note: %s (%s)', tag_names_new, log_title(note.title))
+            logger.debug(u'update tags for note: %s (%s)', tag_names_new, log_title(note.title))
             self.db.notes.update_one(
                 {'_id': db_note['_id']},
                 {"$set": {"Tags": list(tag_names_new)}}
@@ -473,12 +472,12 @@ class UpdateNote:
         delta = self._compare_timestamps(note_created, db_note_created)
         if delta < 0:
             # must be invariant, otherwise followup later update will fail to lookup note as titles are not really unique
-            logger.error('failed to update note "%s", date created mismatch\nin db: %s\nin EN: %s',
-                         note.title, log_date(db_note_created), log_date(note_created))
+            logger.error(u'failed to update note %s, date created mismatch\nin db: %s\nin EN: %s',
+                         log_title(note.title), log_date(db_note_created), log_date(note_created))
             return False
 
-        logger.info('update note "%s" created=%s updated=%s',
-                    note.title, 
+        logger.info(u'update note %s created=%s updated=%s',
+                    log_title(note.title), 
                     log_date(self._get_note_timestamp(note.created)), 
                     log_date(self._get_note_timestamp(note.updated)))
 
@@ -579,7 +578,7 @@ class UpdateNote:
                     "Size": len(resource.data.body),
                     "Type": "",
                     "Path": img_path,
-                    # "AlbumId": "52d3e8ac99c37b7f0d000001",  # TODO verify handling
+                    # "AlbumId": "52d3e8ac99c37b7f0d000001",  # what for?
                     # "IsDefaultAlbum": True,
                     "CreatedTime": self._get_note_timestamp(note.created),
                 })
@@ -603,7 +602,7 @@ class UpdateNote:
         for imageInfo in imageList:
             resource = note.get_image_resource(imageInfo)
             if resource is None:
-                logger.warning('failed to lookup image for %s: %s', log_title(note.title), imageInfo)
+                logger.warning(u'failed to lookup image for %s: %s', log_title(note.title), imageInfo)
             else:
                 handle_image(resource)
 

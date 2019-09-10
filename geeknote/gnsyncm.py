@@ -1,10 +1,13 @@
-#!/usr/bin/env python2 # noqa: E902
+﻿#!/usr/bin/env python2 # noqa: E902
 # -*- coding: utf-8 -*-
 """ sync evernote notes to mongodb
 
-ATTN still beta testing ahead
+usage:
+rem chcp 65001 ?
+set PYTHONIOENCODING=UTF-8
+pipenv run python geeknote/gnsyncm.py --incremental
+
 known issues:
-+ fix encoding / display when logging to console vs logfile (e.g. 'Der Spion des K├╢nigs - reading')  - python3 migration?
 + tags seem to get dropped under not yet determined circumstances
   e.g. removed tag personalkb from "Automating EN backups?"
 
@@ -28,7 +31,16 @@ import config
 from geeknote import GeekNote
 from storage import Storage
 import tools
-from updatenote import UpdateNote
+from updatenote import UpdateNote, log_title
+
+
+class CustomStreamHandler(logging.StreamHandler):
+    def emit(self, record):
+        msg = record.msg
+        if not isinstance(msg, unicode):
+            # ATTN troubles if missing non-uc and unicode params if default encoding is ascii
+            pass  # to set breakpoint
+        logging.StreamHandler.emit(self, record)
 
 
 def setup_logging(logname):
@@ -36,8 +48,8 @@ def setup_logging(logname):
     # FORMAT = "%(asctime)-15s %(module)s %(funcName)s %(lineno)d : %(message)s"
     LOG_FORMAT = '%(asctime)-15s %(levelname)s  %(message)s'
     LOG_FORMAT_2 = '%(asctime)-15s  %(message)s'
+    LOG_FORMAT_3 = u'%(asctime)-15s  %(message)s'
     LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
-    # TODO add/use logging_gnsyncm.conf to/from app folder
     logging._defaultFormatter = logging.Formatter(u"%(message)s")
     logging.basicConfig(format=LOG_FORMAT_2)  # datefmt=
     logpath = os.path.join(config.APP_DIR, 'gnsyncm.%s.log' % datetime.now().strftime("%Y-%m-%d"))
@@ -48,6 +60,7 @@ def setup_logging(logname):
 
     # set default logger (write log to file)
     formatter = logging.Formatter(LOG_FORMAT, LOG_DATEFMT)
+    formatter2 = logging.Formatter(LOG_FORMAT_3, LOG_DATEFMT)
 
     logger = logging.getLogger()  # root logger
     #log_fh = io.open(logpath, "a", encoding="utf-8-sig")
@@ -57,11 +70,11 @@ def setup_logging(logname):
     logger.setLevel(logging.INFO)
 
     logger = logging.getLogger(logname)
-    handler = logging.StreamHandler(sys.stderr)
+    handler = CustomStreamHandler(sys.stderr)
+    handler.setFormatter(formatter2)
     logger.addHandler(handler)
     logger.setLevel(os.environ.get('LOGLEVEL') or logging.INFO)
-    logger.info("setup gnsyncm")
-    logger.info(u"## äöüéδ\n")
+    logger.info(u"\n")
     return logger
 
 
@@ -201,17 +214,17 @@ class GNSyncM:
         assert self.all_set, "cannot sync with partial initialization"
         notes = self._get_notes(changed_after)
         if not notes:
-            logger.info("no notes found to be synced in %s", self.notebook_name)
+            logger.info(u"no notes found to be synced in %s", self.notebook_name)
             return 0
 
-        logger.info("found %s notes to be synced in notebook %s", len(notes), self.notebook_name)
+        logger.info(u"found %s notes to be synced in notebook %s", len(notes), self.notebook_name)
         synced = 0
         for note in notes:
             if changed_after is not None:
                 # double checked, as changed_after is used as constaint by _get_notes already
                 note_changed = self.updater._get_note_timestamp(note.updated or note.created)
                 if note_changed < changed_after:
-                    logger.debug("ignore note '%s', last changed %s", note.title, changed_after)
+                    logger.warning(u"ignore note '%s', last changed %s", log_title(note.title), changed_after)
                     continue
 
             # wrap note (NoteMetadata object) to provide get_resource_by_hash ...
@@ -220,7 +233,7 @@ class GNSyncM:
                 synced += 1  # count number of notes effectively synced
 
         self.updater.update_note_count()
-        logger.info('Sync Complete\n')
+        logger.info(u'Sync Complete\n')
         return synced
 
     def _get_notes(self, changed_after=None):
@@ -230,7 +243,8 @@ class GNSyncM:
         if changed_after is not None:
             # limit number of notes to check using constraint on date updated
             # e.g. 'updated:20070704T150000Z'  # does not work as expected (in EN sandbox)
-            keywords = 'created:' + changed_after.strftime("%Y%m%dT%H%M%S")  # e.g. 'created:20070704T20190801'
+            # keywords = 'updated:' + changed_after.strftime("%Y%m%dT%H%M%S")  # e.g. 'updated:20070704T20190801' # fails!!
+            keywords = 'updated:' + changed_after.strftime("%Y%m%d")  # e.g. 'updated:20070704T20190801'
             # logger.debug("restrict notes using filter: %s", keywords)  # log bloat
         else:
             keywords = ''
@@ -255,10 +269,11 @@ def main():
         parser.add_argument('--all-linked', action='store_true', help='Get all linked notebooks')
         parser.add_argument('--date', action='store', help='only notes created or updated after this date', default=None)
         parser.add_argument('--incremental', action='store_true', help='only notes created or updated since last successful run')
+        parser.add_argument('--keep-lastupdate', action='store_true', help='do not change date last_updated')
         parser.add_argument('--no-sleep-on-ratelimit', action='store_true', help='dont sleep on being ratelimited')
 
         args = parser.parse_args()
-        logger.info("run gnsyncm with args: %s", args)
+        logger.info(u"run gnsyncm with args: %s", args)
 
         notebook_name = args.notebook
         sleepOnRateLimit = not args.no_sleep_on_ratelimit
@@ -284,7 +299,7 @@ def main():
             args.all = True  # --incremental implies --all
 
         if args.all:
-            logger.info("Synching all notebooks ...")
+            logger.info(u"Synching all notebooks ...")
             notebook_count = 0
             notes_synced = 0
             for notebook in all_notebooks(sleep_on_ratelimit=sleepOnRateLimit):
@@ -293,14 +308,14 @@ def main():
                 assert GNS.all_set, "GNSyncM initialization incomplete"
                 notes_synced += GNS.sync(changed_after)
                 notebook_count += 1
-            logger.info("synced total %s notebooks, %s notes", notebook_count, notes_synced)
+            logger.info(u"synced total %s notebooks, %s notes", notebook_count, notes_synced)
         else:
             GNS = GNSyncM(notebook_name, sleep_on_ratelimit=sleepOnRateLimit)
             assert GNS.all_set, "troubles with GNSyncM initialization"
             notes_synced = GNS.sync(changed_after)
             logger.info("synced notebook %s, %s notes", notebook_name, notes_synced)
 
-        if args.incremental:
+        if args.incremental and not args.keep_lastupdate:
             assert os.path.isfile(last_update_fn)
             now = datetime.now().replace(microsecond=0)
             last_update_info = {
