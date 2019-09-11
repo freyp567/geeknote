@@ -3,11 +3,9 @@
 """ sync evernote notes to mongodb
 
 usage:
-rem chcp 65001 ?
-set PYTHONIOENCODING=UTF-8
 pipenv run python geeknote/gnsyncm.py --incremental
 
-known issues:
+known issues / yet to be fixed:
 + tags seem to get dropped under not yet determined circumstances
   e.g. removed tag personalkb from "Automating EN backups?"
 
