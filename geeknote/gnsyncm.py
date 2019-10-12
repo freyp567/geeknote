@@ -219,10 +219,10 @@ class GNSyncM:
         synced = 0
         for note in notes:
             if changed_after is not None:
-                # double checked, as changed_after is used as constaint by _get_notes already
+                # double checked, as changed_after is used as constraint by _get_notes already
                 note_changed = self.updater._get_note_timestamp(note.updated or note.created)
                 if note_changed < changed_after:
-                    logger.warning(u"ignore note '%s', last changed %s", log_title(note.title), changed_after)
+                    logger.warning(u"ignore note '%s', updated %s", log_title(note.title), changed_after)
                     continue
 
             # wrap note (NoteMetadata object) to provide get_resource_by_hash ...
@@ -278,6 +278,7 @@ def main():
         geeknote = GeekNote(sleepOnRateLimit=sleepOnRateLimit)
         logger.debug("using Evernote with consumerKey=%s", geeknote.consumerKey)
 
+        start_sync = datetime.now().replace(microsecond=0)
         last_update_fn = config.LAST_UPDATE_FN
         changed_after = None
         if args.date:
@@ -294,6 +295,8 @@ def main():
 
             last_update_info = json.load(open(last_update_fn, 'r'), object_hook=fix_last_update)
             changed_after = last_update_info['succeeded']
+            # currently we can constrain search only on days, so start at beginning of day
+            changed_after = changed_after.replace(hour=0, minute=0, second=0, microsecond=0)
             args.all = True  # --incremental implies --all
 
         if args.all:
@@ -315,9 +318,9 @@ def main():
 
         if args.incremental and not args.keep_lastupdate:
             assert os.path.isfile(last_update_fn)
-            now = datetime.now().replace(microsecond=0)
+            logger.info(u"synced notes %s .. %s", changed_after.isoformat(), start_sync.isoformat())
             last_update_info = {
-                'succeeded': now
+                'succeeded': start_sync
             }
             json.dump(last_update_info, open(last_update_fn, 'w'), default=str, indent=4)
 
